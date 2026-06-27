@@ -25,18 +25,18 @@ Last updated: 2026-06-27
 
 | Property         | Class                                                                                                                  |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Background       | `bg-surface-muted` page, `bg-surface` card                                                                             |
+| Background       | `bg-surface-muted` page, `bg-surface` card, token-based radial gradient on left panel                                   |
 | Border           | `border border-border`                                                                                                 |
-| Border radius    | `rounded-xl` card, `rounded-md` buttons and alerts, `rounded-sm` provider mark                                         |
-| Text — primary   | `text-text-primary`, `text-2xl font-semibold leading-8` heading, `text-sm font-medium` button                          |
+| Border radius    | `rounded-xl` card, `rounded-md` buttons and alerts, `rounded-full` trust badge, `rounded-sm` provider mark             |
+| Text — primary   | `text-text-slate`, `text-[42px] font-bold leading-[1.05]` hero, `text-text-primary`, `text-sm font-medium` button      |
 | Text — secondary | `text-text-secondary`, `text-text-muted`, `text-xs leading-5` helper                                                    |
-| Spacing          | `p-6` card, `mt-8` heading block, `mt-6 space-y-3` actions, `px-4` button                                               |
+| Spacing          | `px-6 py-16` page body, `p-8 md:p-10` split panels, `mt-8` hero block, `mt-7 space-y-3` actions, `px-4` button         |
 | Hover state      | `hover:bg-surface-secondary`                                                                                           |
 | Shadow           | `shadow-sm`                                                                                                            |
 | Accent usage     | `focus:ring-1 focus:ring-accent`, `border-error text-error` for auth errors                                            |
 
 **Pattern notes:**
-Login/auth surfaces use a single centered card on `bg-surface-muted`, with provider buttons styled as full-width secondary buttons. Provider marks are compact bordered squares inside the button rather than separate decorative icons.
+Login/auth surfaces use the standard top navbar plus a centered split card on `bg-surface-muted`. The left panel is editorial with a soft token gradient and large headline; the right panel is compact, form-focused, and uses full-width secondary provider buttons.
 
 ### Protected Placeholder Card
 

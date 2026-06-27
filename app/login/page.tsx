@@ -33,57 +33,90 @@ export default async function LoginPage({
   const error = errorKey ? errorMessages[errorKey] : null;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1440px] items-center justify-center border-x border-border bg-surface-muted px-6 py-12">
-      <section className="w-full max-w-[440px] rounded-xl border border-border bg-surface p-6 shadow-sm">
-        <div className="flex justify-center">
-          <Link href="/" aria-label="JobPilot home">
+    <main className="mx-auto min-h-screen w-full max-w-[1440px] overflow-hidden border-x border-border bg-surface-muted">
+      <header className="h-16 border-b border-border bg-surface">
+        <div className="mx-auto flex h-full max-w-[1040px] items-center justify-between px-6">
+          <Link href="/" className="flex items-center" aria-label="JobPilot home">
             <Image
               src="/logo.png"
               alt="JobPilot"
               width={124}
               height={40}
               priority
-              className="h-9 w-auto object-contain"
+              className="h-8 w-auto object-contain"
             />
           </Link>
+          <nav className="hidden items-center gap-10 text-sm font-medium text-text-dark md:flex">
+            <Link href="/dashboard">Dashboard</Link>
+            <Link href="/find-jobs">Find Jobs</Link>
+            <Link href="/profile">Profile</Link>
+          </nav>
+          <Link
+            href="/login"
+            className="rounded-md bg-overlay-dark px-4 py-2 text-sm font-medium text-accent-foreground shadow-sm transition hover:bg-overlay"
+          >
+            Start for free
+          </Link>
         </div>
+      </header>
 
-        <div className="mt-8 text-center">
-          <h1 className="text-2xl font-semibold leading-8 text-text-primary">
-            Sign in to JobPilot
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-text-secondary">
-            Use your Google or GitHub account to continue.
-          </p>
-        </div>
+      <section className="flex min-h-[calc(100vh-4rem)] items-center justify-center px-6 py-16">
+        <div className="grid w-full max-w-[760px] overflow-hidden rounded-xl border border-border bg-surface shadow-sm md:grid-cols-[1.15fr_1fr]">
+          <div className="border-b border-border bg-[radial-gradient(circle_at_22%_22%,var(--color-hero-pink)_0,transparent_35%),radial-gradient(circle_at_78%_28%,var(--color-hero-blue)_0,transparent_36%),linear-gradient(180deg,var(--color-surface)_0%,var(--color-hero-pink)_100%)] p-8 md:border-b-0 md:border-r md:p-10">
+            <span className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs font-medium text-text-secondary shadow-sm">
+              <span className="flex h-4 w-4 items-center justify-center rounded-sm border border-accent text-[10px] font-semibold leading-none text-accent">
+                O
+              </span>
+              OAuth secured by InsForge
+            </span>
 
-        {error ? (
-          <div className="mt-6 rounded-md border border-error bg-surface px-3 py-2 text-sm leading-5 text-error">
-            {error}
+            <h1 className="mt-8 max-w-[360px] text-[42px] font-bold leading-[1.05] text-text-slate md:text-[48px]">
+              Sign in and let the agent prep your next application.
+            </h1>
+            <p className="mt-6 max-w-[360px] text-base leading-7 text-text-secondary">
+              Connect with Google or GitHub to start building your profile,
+              matching jobs, and creating tailored application materials.
+            </p>
+            <p className="mt-10 text-xs font-medium leading-5 text-text-secondary">
+              New users are routed to profile setup after sign-in.
+            </p>
           </div>
-        ) : null}
 
-        <div className="mt-6 space-y-3">
-          {oauthProviders.map((provider) => (
-            <form action={initiateOAuth} key={provider.id}>
-              <input type="hidden" name="provider" value={provider.id} />
-              <button
-                type="submit"
-                className="flex h-12 w-full items-center justify-center gap-3 rounded-md border border-border bg-surface px-4 text-sm font-medium text-text-primary shadow-sm transition hover:bg-surface-secondary focus:outline-none focus:ring-1 focus:ring-accent"
-              >
-                <span className="flex h-7 min-w-7 items-center justify-center rounded-sm border border-border bg-surface-secondary text-xs font-semibold text-text-dark">
-                  {provider.mark}
-                </span>
-                {provider.label}
-              </button>
-            </form>
-          ))}
+          <div className="flex flex-col justify-center p-8 md:p-10">
+            <p className="text-sm leading-5 text-text-secondary">Welcome to</p>
+            <h2 className="mt-2 text-2xl font-semibold leading-8 text-text-primary">
+              JobPilot
+            </h2>
+            <p className="mt-3 text-sm leading-5 text-text-secondary">
+              Choose your preferred provider to continue.
+            </p>
+
+            {error ? (
+              <div className="mt-6 rounded-md border border-error bg-surface px-3 py-2 text-sm leading-5 text-error">
+                {error}
+              </div>
+            ) : null}
+
+            <div className="mt-7 space-y-3">
+              {oauthProviders.map((provider) => (
+                <form action={initiateOAuth} key={provider.id}>
+                  <input type="hidden" name="provider" value={provider.id} />
+                  <button
+                    type="submit"
+                    className="flex h-11 w-full items-center justify-center gap-3 rounded-md border border-border bg-surface px-4 text-sm font-medium text-text-primary transition hover:bg-surface-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+                  >
+                    <span className="flex min-w-6 items-center justify-center text-xs font-semibold text-accent">
+                      {provider.mark}
+                    </span>
+                    {provider.label}
+                  </button>
+                </form>
+              ))}
+            </div>
+          </div>
         </div>
-
-        <p className="mt-6 text-center text-xs leading-5 text-text-muted">
-          Protected pages open after your session is created.
-        </p>
       </section>
     </main>
+
   );
 }
