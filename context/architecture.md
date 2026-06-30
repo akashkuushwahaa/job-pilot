@@ -293,8 +293,8 @@ Access: authenticated users only, own files only.
 - Methods: Google OAuth, GitHub OAuth
 - Protected routes: /dashboard, /profile, /find-jobs, /find-jobs/[id]
 - Public routes: /, /login
-- Middleware in middleware.ts checks session on every protected route
-- On login → redirect to /dashboard
+- Next 16 `proxy.ts` checks session on every protected route
+- On login → redirect to /profile if profile is missing or incomplete, otherwise /dashboard
 
 ---
 

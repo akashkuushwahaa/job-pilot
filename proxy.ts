@@ -5,18 +5,6 @@ import {
 } from "@insforge/sdk/ssr/middleware";
 import { NextResponse, type NextRequest } from "next/server";
 
-const protectedRoutes = [
-  "/dashboard",
-  "/profile",
-  "/find-jobs",
-];
-
-function isProtectedPath(pathname: string) {
-  return protectedRoutes.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`),
-  );
-}
-
 function createRequestCookieStore(request: NextRequest): CookieStore {
   return {
     get(name: string) {
@@ -52,21 +40,15 @@ export async function proxy(request: NextRequest) {
   });
   const { pathname } = request.nextUrl;
 
-  if (isProtectedPath(pathname) && !accessToken) {
+  if (!accessToken) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
-  }
-
-  if (pathname === "/login" && accessToken) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
   return response;
 }
 
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-  ],
+  matcher: ["/dashboard/:path*", "/profile/:path*", "/find-jobs/:path*"],
 };

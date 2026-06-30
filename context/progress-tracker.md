@@ -53,7 +53,7 @@ Update this file after every completed feature. Any AI agent reading this should
 - Progress tracker must be updated as features are completed or the active next step changes.
 - Homepage was built as a static App Router page using existing assets from `public/` and the project token system.
 - Auth will use the official `@insforge/sdk` / `@insforge/sdk/ssr` pattern from the refreshed InsForge skill docs.
-- Auth uses InsForge SSR helpers with server-owned OAuth initiation, `/api/auth/callback`, `/api/auth/refresh`, and Next 16 `proxy.ts` route protection.
+- Auth uses InsForge SSR helpers with route-handler OAuth initiation, `/api/auth/callback`, `/api/auth/refresh`, and Next 16 `proxy.ts` route protection.
 
 ---
 
@@ -64,3 +64,4 @@ Update this file after every completed feature. Any AI agent reading this should
 - 2026-06-27: Refreshed the official InsForge app-code skill from the skills registry and read `auth/sdk-integration.md` plus `auth/ssr-integration.md`.
 - 2026-06-27: Live InsForge metadata shows OAuth providers enabled: `github`, `google`; email verification is required with `code`; password minimum is 6; reset password method is `code`; `allowedRedirectUrls` includes `http://localhost:3000/api/auth/callback`.
 - 2026-06-27: Auth implementation added Google/GitHub OAuth login, callback exchange, refresh route, sign out, protected routes, and placeholder authenticated pages. Production build and lint passed.
+- 2026-06-29: Aligned completed auth flow with `adrianhajdin/job_pilot` reference: OAuth starts through `/api/auth/oauth/[provider]`, callback clears auth cookies on failure, proxy only matches protected routes, and post-login routing sends users with missing/incomplete profiles to `/profile`.

@@ -1,47 +1,63 @@
-import { createAuthActions } from "@insforge/sdk/ssr";
-import { cookies } from "next/headers";
+import {
+  clearAuthCookies,
+  createServerClient,
+  setAuthCookies,
+} from "@insforge/sdk/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { getPostLoginRedirectPath } from "@/lib/auth";
+
+const verifierCookieName = "jobpilot_oauth_code_verifier";
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const loginUrl = new URL("/login", request.url);
+
   try {
     const code = request.nextUrl.searchParams.get("insforge_code");
     const oauthError = request.nextUrl.searchParams.get("error");
+    const codeVerifier = request.cookies.get(verifierCookieName)?.value;
 
-    if (oauthError || !code) {
-      return NextResponse.redirect(
-        new URL("/login?error=oauth_failed", request.url),
-      );
+    if (oauthError || !code || !codeVerifier) {
+      loginUrl.searchParams.set("error", "callback");
+      const response = NextResponse.redirect(loginUrl);
+      response.cookies.delete(verifierCookieName);
+      clearAuthCookies(response.cookies);
+      return response;
     }
 
-    const cookieStore = await cookies();
-    const codeVerifier = cookieStore.get("insforge_code_verifier")?.value;
+    const insforge = createServerClient();
+    const { data, error } = await insforge.auth.exchangeOAuthCode(
+      code,
+      codeVerifier,
+    );
 
-    if (!codeVerifier) {
-      return NextResponse.redirect(
-        new URL("/login?error=missing_verifier", request.url),
-      );
+    if (error || !data?.accessToken || !data.user) {
+      console.error("[api/auth/callback]", error);
+      loginUrl.searchParams.set("error", "callback");
+      const response = NextResponse.redirect(loginUrl);
+      response.cookies.delete(verifierCookieName);
+      clearAuthCookies(response.cookies);
+      return response;
     }
 
-    const response = NextResponse.redirect(new URL("/dashboard", request.url));
-    const auth = createAuthActions({
-      requestCookies: request.cookies,
-      responseCookies: response.cookies,
+    const redirectPath = await getPostLoginRedirectPath(
+      data.user.id,
+      data.accessToken,
+    );
+    const response = NextResponse.redirect(new URL(redirectPath, request.url));
+    response.cookies.delete(verifierCookieName);
+    setAuthCookies(response.cookies, {
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
     });
-    const { data, error } = await auth.exchangeOAuthCode(code, codeVerifier);
-
-    if (error || !data) {
-      return NextResponse.redirect(
-        new URL("/login?error=exchange_failed", request.url),
-      );
-    }
-
-    response.cookies.delete("insforge_code_verifier");
 
     return response;
   } catch (error) {
     console.error("[api/auth/callback]", error);
-    return NextResponse.redirect(
-      new URL("/login?error=exchange_failed", request.url),
-    );
+    loginUrl.searchParams.set("error", "callback");
+    const response = NextResponse.redirect(loginUrl);
+    response.cookies.delete(verifierCookieName);
+    clearAuthCookies(response.cookies);
+    return response;
   }
 }

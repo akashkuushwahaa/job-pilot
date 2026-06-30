@@ -43,7 +43,7 @@ InsForge authentication — Google and GitHub OAuth.
 - OAuth callback handler
 - Session management
 - Middleware protecting /dashboard, /profile, /find-jobs, /find-jobs/[id]
-- After login → redirect to /dashboard
+- After login → redirect to /profile when the profile is missing/incomplete, otherwise /dashboard
 
 ---
 
