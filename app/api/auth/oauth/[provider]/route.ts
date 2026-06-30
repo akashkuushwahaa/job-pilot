@@ -1,4 +1,5 @@
 import { createAuthActions } from "@insforge/sdk/ssr";
+import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 
 const allowedProviders = new Set(["google", "github"]);
@@ -25,7 +26,7 @@ export async function GET(
       return NextResponse.redirect(loginUrl);
     }
 
-    const auth = createAuthActions({ requestCookies: request.cookies });
+    const auth = createAuthActions({ cookies: await cookies() });
     const { data, error } = await auth.signInWithOAuth(normalizedProvider, {
       redirectTo: new URL("/api/auth/callback", request.nextUrl.origin).toString(),
       skipBrowserRedirect: true,
