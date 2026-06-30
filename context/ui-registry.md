@@ -21,7 +21,7 @@ After building any component — update this file with the component name, file 
 ### App Navbar
 
 File: components/layout/AppNavbar.tsx
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 | Property         | Class                                                                                              |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -36,7 +36,7 @@ Last updated: 2026-06-29
 | Accent usage     | `text-accent` active nav item                                                                       |
 
 **Pattern notes:**
-The app navbar is sticky (`sticky top-0 z-10`) and should be used as the persistent top bar for auth and protected app placeholders. It uses the full page max width with the logo left, nav centered, active nav in accent, and dark CTA right.
+The app navbar is sticky (`sticky top-0 z-10`) and is the single persistent top bar for the landing page, auth page, and protected app placeholders. Do not create page-local navbar variants; reuse `AppNavbar` so height, logo size, nav text, spacing, and CTA treatment remain identical everywhere.
 
 ### Auth Login Card
 

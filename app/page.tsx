@@ -1,6 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
 
+import { AppNavbar } from "@/components/layout/AppNavbar";
+
 const features = [
   {
     title: "Find jobs that actually fit",
@@ -30,36 +32,6 @@ const confidenceFeatures = [
     copy: "Filter out low fit jobs and stay on the ones that actually matter. Spend less time sorting and more time applying.",
   },
 ];
-
-function Header() {
-  return (
-    <header className="h-16 border-b border-border bg-surface">
-      <div className="mx-auto flex h-full max-w-[1440px] items-center justify-between px-6">
-        <Link href="/" className="flex items-center" aria-label="JobPilot home">
-          <Image
-            src="/logo.png"
-            alt="JobPilot"
-            width={124}
-            height={40}
-            priority
-            className="h-8 w-auto object-contain"
-          />
-        </Link>
-        <nav className="hidden items-center gap-10 text-sm font-medium text-text-dark md:flex">
-          <Link href="/dashboard">Dashboard</Link>
-          <Link href="/find-jobs">Find Jobs</Link>
-          <Link href="/profile">Profile</Link>
-        </nav>
-        <Link
-          href="/login"
-          className="rounded-md bg-overlay-dark px-4 py-2 text-sm font-medium text-accent-foreground shadow-sm transition hover:bg-overlay"
-        >
-          Start for free
-        </Link>
-      </div>
-    </header>
-  );
-}
 
 function HeroActions() {
   return (
@@ -260,7 +232,7 @@ function Footer() {
 export default function Home() {
   return (
     <main className="mx-auto w-full max-w-[1440px] overflow-hidden border-x border-border bg-surface shadow-sm">
-      <Header />
+      <AppNavbar />
       <GradientBand
         title={"Job hunting is hard. Your tools shouldn’t be."}
         copy="Stop applying blind. JobPilot finds the jobs, researches the companies, and gives you everything you need to stand out."
