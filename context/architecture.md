@@ -227,14 +227,22 @@ URL saved to profiles table
 | remote_preference   | text        | remote / onsite / hybrid / any               |
 | preferred_locations | text[]      | Optional preferred locations                 |
 | salary_expectation  | text        | Optional                                     |
-| cover_letter_tone   | text        | formal / casual / enthusiastic               |
 | linkedin_url        | text        |                                              |
 | portfolio_url       | text        |                                              |
 | work_authorization  | text        | citizen / permanent_resident / visa_required |
-| resume_pdf_url      | text        | InsForge Storage URL of current resume       |
-| is_complete         | boolean     | True when all required fields filled         |
+| resume_path         | text        | Storage object key, **not** a URL            |
 | created_at          | timestamptz |                                              |
-| updated_at          | timestamptz |                                              |
+| updated_at          | timestamptz | Maintained by `system.update_updated_at()`   |
+
+`id` is the PK and references `auth.users(id) ON DELETE CASCADE`. There is **no row until the user
+saves** — `actions/profile.ts` upserts on first save, so every read must handle a missing profile.
+
+Three columns from earlier drafts do not exist and must not be re-added:
+
+- **`is_complete`, and any completion-percentage or missing-fields column.** Completeness is derived
+  by one helper in `lib/`, so redefining "complete" never needs a backfill migration. A stored copy
+  would be a second source of truth that silently goes stale.
+- **`cover_letter_tone`.** Cover letter generation is out of scope.
 
 ### `agent_runs`
 
@@ -255,8 +263,9 @@ URL saved to profiles table
 | ------------------ | ----------- | ---------------------------------------------- |
 | id                 | uuid        |                                                |
 | run_id             | uuid        | References agent_runs — null if from URL input |
-| user_id            | uuid        | References profiles                            |
+| user_id            | uuid        | References auth.users                          |
 | source             | text        | search / url                                   |
+| external_id        | text        | Adzuna's stable job id — the dedupe key        |
 | source_url         | text        | Original job listing URL                       |
 | external_apply_url | text        | Direct company apply URL                       |
 | title              | text        |                                                |
@@ -277,6 +286,18 @@ URL saved to profiles table
 | company_research   | jsonb       | Company dossier from research agent            |
 | found_at           | timestamptz |                                                |
 
+**Re-running a search must not duplicate rows.** A unique partial index
+`(user_id, source, external_id) WHERE external_id IS NOT NULL` is the dedupe key; feature 10 upserts
+onto it. It is partial so that url-sourced jobs, which have no Adzuna id, are not all collapsed onto
+one NULL row per user.
+
+**The upsert must never include `company_research` in its update list.** Re-discovery refreshes
+title, salary, `match_score`, `match_reason` and the skill arrays — writing the whole record back
+would wipe a dossier the user already spent a Browserbase session generating. Verified against the
+live database: after an upsert, `match_score` refreshed 50 → 91 and `company_research` survived.
+
+No tailored-resume columns exist. Resume tailoring is out of scope.
+
 ### `agent_logs`
 
 | Column     | Type        | Notes                            |
@@ -293,11 +314,32 @@ URL saved to profiles table
 
 ## InsForge Storage
 
-| Bucket  | Path                         | Contents                  |
-| ------- | ---------------------------- | ------------------------- |
-| resumes | resumes/{user_id}/resume.pdf | Current active resume PDF |
+| Bucket  | Path                  | Contents                  |
+| ------- | --------------------- | ------------------------- |
+| resumes | {user_id}/resume.pdf  | Current active resume PDF |
 
-Access: authenticated users only, own files only.
+**The bucket is private.** `getPublicUrl()` does not work against it — `profiles.resume_path` stores
+the object key, and a link is produced server-side at render time with
+`createSignedUrl(path, 3600)`. A resume is PII, and on a public bucket its URL is a permanent bearer
+token that leaks through logs, `Referer` headers and PostHog session replay.
+
+Verified: an anonymous caller gets 403 listing the bucket and 401 fetching an object directly.
+
+---
+
+## Row Level Security
+
+RLS is enabled on all four tables with one `FOR ALL TO authenticated` policy each, carrying both
+`USING` and `WITH CHECK` — so a user can neither read nor write a row they do not own, and cannot
+re-point an existing row at another user. `auth.uid()` is wrapped as `(SELECT auth.uid())` so it is
+evaluated once per query rather than once per row.
+
+`anon` has **no** privileges on any app table. InsForge grants broad DML to `anon` on `public` tables
+by default; the migration revokes it, so an unauthenticated request is refused at the privilege layer
+before RLS is even consulted. Verified over the live REST API: `42501 permission denied` on all four.
+
+Policies do not replace grants — every table also has explicit
+`GRANT SELECT, INSERT, UPDATE, DELETE … TO authenticated`.
 
 ---
 

@@ -6,12 +6,12 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 1 — Foundation
-**Last completed:** 03 PostHog Initialization — browser init in `instrumentation-client.ts`,
-`captureServerEvent` in `lib/posthog-server.ts`, identification in the root layout, and the three
-auth-lifecycle events. Build, typecheck and lint are clean. **No event has been observed arriving
-in PostHog** — see Notes.
-**Next:** 04 Database Schema.
+**Phase:** Phase 1 — Foundation ✅ complete
+**Last completed:** 04 Database Schema — four tables, 12 indexes, grants and RLS applied to the live
+backend via `migrations/20260731164849_create-jobpilot-schema.sql`, plus the private `resumes`
+bucket. Anonymous access and the dedupe/upsert behaviour are both verified against the real backend;
+authenticated cross-user isolation is not — see Notes.
+**Next:** Phase 2 — 05 Profile Page (Full UI).
 
 ---
 
@@ -22,7 +22,7 @@ in PostHog** — see Notes.
 - [x] 01 Homepage
 - [x] 02 Auth
 - [x] 03 PostHog Initialization
-- [ ] 04 Database Schema
+- [x] 04 Database Schema
 
 ### Phase 2 — Profile Page
 
@@ -265,6 +265,45 @@ three auth events being beyond build-plan 03's stated scope. Both are deliberate
 - **`app/global-error.tsx` was kept rather than deleted**, but no longer as the wizard left it — see
   the fixes above. Exception autocapture stays on in `instrumentation-client.ts`.
 
+### Feature 04 — Database Schema
+
+Designed through `/architect`; the five decisions below were made with the developer, not assumed.
+
+- **Storage is private, and `resume_pdf_url` is now `resume_path`.** `architecture.md` said
+  "authenticated users only, own files only" while `library-docs.md` called `getPublicUrl()` and
+  stored the result — only one could survive. Private won: a resume is PII, and a public URL is a
+  permanent bearer token that leaks via logs, `Referer` and PostHog session replay (which is active
+  on this app). The column stores the object key; features 06 and 08 call `createSignedUrl` at
+  render time. `library-docs.md` rewritten.
+- **No trigger on `auth.users`.** The `profiles` row is created by an app-side upsert on first save.
+  A trigger runs inside the sign-up transaction, so a bug in it would break OAuth sign-up for every
+  new user — not worth avoiding one null check. Every read of `profiles` must handle absence.
+- **`jobs.external_id` added; it is the dedupe key.** Nothing previously stopped a re-run of the same
+  search from duplicating every row and inflating feature 15's "Total Jobs Found". Keyed on Adzuna's
+  stable `id` rather than `redirect_url`, because a tracking URL may carry a per-request token and
+  the constraint would then silently never fire. The index is partial so url-sourced jobs (no Adzuna
+  id) are not collapsed onto one NULL row per user.
+- **Completeness is derived, not stored, and `is_complete` was dropped.** Feature 06 said percentage
+  and missing fields were "calculated and saved", but no columns existed for them. Storing them
+  means a backfill migration every time the definition of "complete" changes, and stale rows until
+  then. One helper in `lib/` is the single source of truth.
+- **`cover_letter_tone` dropped too** — same drift class as the tailored-resume columns, since cover
+  letters are out of scope. Flagged as an assumption and confirmed.
+
+Implementation notes worth keeping:
+
+- **Grants are not optional.** InsForge grants broad DML on `public` tables to `anon` and
+  `authenticated` by default so RLS can decide rows. Policies do **not** grant privileges. The
+  migration revokes everything from `anon` and grants explicit DML to `authenticated`.
+- **`system.update_updated_at()` is built in** — used for the `profiles` updated_at trigger rather
+  than hand-rolling one.
+- **`(SELECT auth.uid())` subquery form** in every policy, so it is evaluated once per query.
+- **`insforge link` edits tracked files.** It appended an `<!-- INSFORGE:START -->` block to
+  `AGENTS.md` (accurate, kept) and added a blanket `.claude` rule to `.gitignore`. That rule was
+  removed: this repo versions its skills under `.claude/skills/`, and the 65 tracked files were safe
+  only because gitignore never applies to tracked paths — any *new* skill would have been invisible.
+- **`.insforge/` is gitignored** — `.insforge/project.json` holds a full-access admin key.
+
 ---
 
 ## Notes
@@ -280,6 +319,16 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
 - **`lib/insforge-client.ts` is intentionally unreferenced.** `architecture.md` prescribes it and
   feature 06 needs it for Storage and Realtime, so it stays rather than being deleted and re-added.
   It has never been exercised — treat it as unverified when feature 06 first imports it.
+- **Feature 04: the RLS policies themselves are unproven.** Verified against the live backend: RLS is
+  enabled with one `USING` + `WITH CHECK` policy per table; `anon` has zero privileges and gets
+  `42501 permission denied` over the real REST API on all four tables; the private bucket returns 403
+  on list and 401 on direct fetch; the unique index rejects a duplicate `external_id`; an upsert
+  refreshed `match_score` 50 → 91 while preserving `company_research`; two NULL-`external_id` rows
+  coexist. All test rows were deleted — every table is empty.
+  **Not verified: that user A cannot read user B's rows.** That is the one property RLS exists for,
+  and it needs a real user JWT. Both MCP `run-raw-sql` and CLI `db query` run as `project_admin` and
+  refuse `SET ROLE`, so neither can prove it. There is currently only one user in `auth.users`.
+  Test it the moment a second signed-in session exists.
 - **Feature 03 is not fully verified either, and for the same reason.** What was verified: the
   project token and host answer PostHog's flags endpoint with HTTP 200; the posthog-node call shape
   sends a correct `/batch/` payload; the browser bundle contains a real `posthog.init`; the worst-case

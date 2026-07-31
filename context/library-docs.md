@@ -122,31 +122,42 @@ const { error } = await insforge.database
 
 ### Storage
 
+**The `resumes` bucket is private.** `getPublicUrl()` does not work against it.
+
 ```typescript
 // Upload file
-const { data, error } = await insforge.storage
+const { error } = await insforge.storage
   .from("resumes")
   .upload(`${userId}/resume.pdf`, fileBuffer, {
     contentType: "application/pdf",
     upsert: true, // overwrites existing file
   });
 
-// Get public URL
-const { data } = insforge.storage
-  .from("resumes")
-  .getPublicUrl(`${userId}/resume.pdf`);
+// Persist the object KEY, not a URL
+await insforge.database
+  .from("profiles")
+  .update({ resume_path: `${userId}/resume.pdf` })
+  .eq("id", userId);
 
-const url = data.publicUrl;
+// Produce a link server-side, at render time
+const { data } = await insforge.storage
+  .from("resumes")
+  .createSignedUrl(profile.resume_path, 3600);
+
+const url = data.signedUrl;
 ```
 
 **Storage paths:**
 
-- Base resume: `resumes/{user_id}/resume.pdf`
+- Base resume: `{user_id}/resume.pdf` inside the `resumes` bucket
 
 **Rules:**
 
 - Always use `upsert: true` for base resume uploads — overwrites existing file
-- Always save the public URL back to the DB after upload
+- Save the object **key** to `profiles.resume_path` — never a URL
+- Never call `getPublicUrl()` on `resumes`; it is a private bucket
+- `createSignedUrl` is server-side only and the link is short-lived — generate it per render, never
+  store the result in the database
 - Never write files to disk — always upload buffer directly to storage
 
 ---
