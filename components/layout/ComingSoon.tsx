@@ -1,16 +1,16 @@
 import Image from "next/image";
 import Link from "next/link";
 
-import { signOut } from "@/actions/auth";
-import { Button } from "@/components/ui/button";
+import { SignOutButton } from "@/components/auth/SignOutButton";
 
 type Props = {
   title: string;
   feature: string;
+  userId: string;
   email: string;
 };
 
-export function ComingSoon({ title, feature, email }: Props) {
+export function ComingSoon({ title, feature, userId, email }: Props) {
   return (
     <main className="flex flex-1 items-center justify-center bg-background px-6 py-16">
       <div className="w-full max-w-md">
@@ -45,11 +45,7 @@ export function ComingSoon({ title, feature, email }: Props) {
             </dd>
           </dl>
 
-          <form action={signOut} className="mt-6">
-            <Button type="submit" variant="secondary" className="w-full">
-              Sign out
-            </Button>
-          </form>
+          <SignOutButton userId={userId} className="mt-6" />
         </div>
       </div>
     </main>

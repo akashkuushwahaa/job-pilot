@@ -5,6 +5,11 @@ export default async function DashboardPage() {
   const user = await requireUser();
 
   return (
-    <ComingSoon title="Dashboard" feature="Feature 14" email={user.email} />
+    <ComingSoon
+      title="Dashboard"
+      feature="Feature 14"
+      userId={user.id}
+      email={user.email}
+    />
   );
 }

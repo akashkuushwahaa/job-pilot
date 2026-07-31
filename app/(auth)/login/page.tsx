@@ -100,7 +100,11 @@ export default async function LoginPage({ searchParams }: Props) {
                   key={provider}
                   action={signInWithProvider.bind(null, provider)}
                 >
-                  <OAuthButton label={label} icon={<Icon />} />
+                  <OAuthButton
+                    provider={provider}
+                    label={label}
+                    icon={<Icon />}
+                  />
                 </form>
               );
             })}

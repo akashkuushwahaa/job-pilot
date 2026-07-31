@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { createAuthActions } from "@insforge/sdk/ssr";
 
 import { OAUTH_CODE_VERIFIER_COOKIE } from "@/lib/auth";
+import { captureServerEvent } from "@/lib/posthog-server";
 
 function loginRedirect(request: NextRequest, reason: string): NextResponse {
   return NextResponse.redirect(
@@ -46,6 +47,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
 
     response.cookies.delete(OAUTH_CODE_VERIFIER_COOKIE);
+
+    // The conversion point, captured here rather than on the dashboard so it fires
+    // exactly once per sign-in instead of once per visit.
+    //
+    // Inside after() so it runs once the redirect has already been sent. Awaiting it
+    // inline added up to 49s to the sign-in when PostHog was unreachable — measured,
+    // and captureImmediate resolves rather than rejecting, so no catch would have
+    // saved it. Analytics must never sit on the auth critical path.
+    after(() => captureServerEvent(data.user.id, "user_signed_in"));
 
     return response;
   } catch (error) {
