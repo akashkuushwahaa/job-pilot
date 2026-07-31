@@ -32,9 +32,15 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# ...except the template, which carries names only and no values. Without this
+# it is ignored like every other .env file and never reaches a clone or CI.
+!.env.example
 
 # local MCP server config (contains API keys)
 .mcp.json
+
+# InsForge CLI link file — contains the project's full-access admin API key
+.insforge/
 .claude/settings.local.json
 
 # vercel
@@ -43,3 +49,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Agent tool directories, added by `insforge link`.
+# `.claude` and `.insforge` are deliberately NOT in this list: `.insforge/` is
+# already ignored above, and this repo versions its own skills under
+# `.claude/skills/` — a blanket `.claude` rule silently hides every new one.
+.agent
+.agents
+.augment
+.cline
+.github/copilot*
+.kilocode
+.qoder
+.qwen
+.roo
+.trae
+.windsurf

@@ -36,36 +36,21 @@ Two separate instances — never mix them:
 
 ```typescript
 // lib/insforge-client.ts — browser context only
-import { createBrowserClient } from "@insforge/ssr";
+import { createBrowserClient } from "@insforge/sdk/ssr";
 
-export const insforge = createBrowserClient(
-  process.env.NEXT_PUBLIC_INSFORGE_URL!,
-  process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-);
+export const insforge = createBrowserClient();
 ```
 
 ```typescript
 // lib/insforge-server.ts — server context only
-import { createServerClient } from "@insforge/ssr";
 import { cookies } from "next/headers";
+import { createServerClient } from "@insforge/sdk/ssr";
 
-export const createInsforgeServer = async () => {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_INSFORGE_URL!,
-    process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
-          );
-        },
-      },
-    },
-  );
-};
+type InsforgeServerClient = ReturnType<typeof createServerClient>;
+
+export async function createInsforgeServer(): Promise<InsforgeServerClient> {
+  return createServerClient({ cookies: await cookies() });
+}
 ```
 
 **Rules:**
@@ -79,15 +64,24 @@ export const createInsforgeServer = async () => {
 
 ### Auth
 
+Never call `insforge.auth.getCurrentUser()` directly in a page — use the helpers in `lib/auth.ts`,
+which handle the error branch and Next's control-flow exceptions:
+
 ```typescript
-// Get current user in server context
-const insforge = await createInsforgeServer();
-const {
-  data: { user },
-  error,
-} = await insforge.auth.getUser();
-if (!user) redirect("/login");
+// Protected page — redirects to /login when there is no session
+import { requireUser } from "@/lib/auth";
+
+const user = await requireUser();
+
+// Public page that changes based on session — returns null when signed out
+import { getSessionUser } from "@/lib/auth";
+
+const user = await getSessionUser();
 ```
+
+The method is `getCurrentUser()`, not `getUser()`. Auth **mutations** (sign in, sign out, OAuth
+exchange) never run through these clients — they use `createAuthActions()` from `@insforge/sdk/ssr`
+in a Server Action or Route Handler, because only those can write cookies.
 
 ---
 
@@ -95,21 +89,21 @@ if (!user) redirect("/login");
 
 ```typescript
 // Read
-const { data, error } = await insforge
+const { data, error } = await insforge.database
   .from("jobs")
   .select("*")
   .eq("user_id", user.id)
   .order("found_at", { ascending: false });
 
-// Insert
-const { data, error } = await insforge
+// Insert — note the array
+const { data, error } = await insforge.database
   .from("jobs")
-  .insert({ user_id: user.id, title, company, match_score })
+  .insert([{ user_id: user.id, title, company, match_score }])
   .select()
   .single();
 
 // Update
-const { error } = await insforge
+const { error } = await insforge.database
   .from("jobs")
   .update({ company_research: dossier })
   .eq("id", jobId)
@@ -118,6 +112,8 @@ const { error } = await insforge
 
 **Rules:**
 
+- Table access is `insforge.database.from(...)` — there is no top-level `insforge.from(...)`
+- Inserts take an array: `.insert([{ ... }])`
 - Always scope queries to `user_id` — never query without user filter
 - Always handle the `error` return — never assume success
 - Use `.single()` when expecting exactly one row
@@ -126,31 +122,42 @@ const { error } = await insforge
 
 ### Storage
 
+**The `resumes` bucket is private.** `getPublicUrl()` does not work against it.
+
 ```typescript
 // Upload file
-const { data, error } = await insforge.storage
+const { error } = await insforge.storage
   .from("resumes")
   .upload(`${userId}/resume.pdf`, fileBuffer, {
     contentType: "application/pdf",
     upsert: true, // overwrites existing file
   });
 
-// Get public URL
-const { data } = insforge.storage
-  .from("resumes")
-  .getPublicUrl(`${userId}/resume.pdf`);
+// Persist the object KEY, not a URL
+await insforge.database
+  .from("profiles")
+  .update({ resume_path: `${userId}/resume.pdf` })
+  .eq("id", userId);
 
-const url = data.publicUrl;
+// Produce a link server-side, at render time
+const { data } = await insforge.storage
+  .from("resumes")
+  .createSignedUrl(profile.resume_path, 3600);
+
+const url = data.signedUrl;
 ```
 
 **Storage paths:**
 
-- Base resume: `resumes/{user_id}/resume.pdf`
+- Base resume: `{user_id}/resume.pdf` inside the `resumes` bucket
 
 **Rules:**
 
 - Always use `upsert: true` for base resume uploads — overwrites existing file
-- Always save the public URL back to the DB after upload
+- Save the object **key** to `profiles.resume_path` — never a URL
+- Never call `getPublicUrl()` on `resumes`; it is a private bucket
+- `createSignedUrl` is server-side only and the link is short-lived — generate it per render, never
+  store the result in the database
 - Never write files to disk — always upload buffer directly to storage
 
 ---
@@ -549,58 +556,80 @@ const result = JSON.parse(response.choices[0].message.content!);
 
 ### Client Setup (Browser)
 
+Browser init lives in `instrumentation-client.ts` at the repo root — Next 16's client
+instrumentation hook, which runs after the document loads and before React hydrates. There is no
+`lib/posthog-client.ts` and no provider component; a provider would initialise strictly later.
+
 ```typescript
-// lib/posthog-client.ts
+// instrumentation-client.ts
 import posthog from "posthog-js";
 
-export function initPostHog() {
-  if (typeof window !== "undefined") {
-    posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
-      api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST!,
-      capture_pageview: false, // manual pageview tracking
-    });
-  }
-}
-
-// Capture event client-side
-posthog.capture("job_found", {
-  userId,
-  source: "search",
-  matchScore: score,
+posthog.init(process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN, {
+  api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+  defaults: "2026-01-30",
+  capture_exceptions: true,
 });
+```
+
+Client components import the singleton directly:
+
+```typescript
+"use client";
+import posthog from "posthog-js";
+
+posthog.capture("job_search_started", { userId, jobTitle, location });
+```
+
+Whenever a capture is immediately followed by a navigation — a provider redirect, a Server Action
+that redirects — pass both `send_instantly` and the `sendBeacon` transport. `send_instantly` skips
+the batch queue; `sendBeacon` is the only transport the browser still delivers after the document
+unloads, so the event survives the navigation that an XHR would not.
+
+```typescript
+posthog.capture(
+  "user_signed_out",
+  { userId },
+  { send_instantly: true, transport: "sendBeacon" },
+);
 ```
 
 ### Server Setup
 
 ```typescript
-// lib/posthog-server.ts
-import { PostHog } from "posthog-node";
+// lib/posthog-server.ts — captureServerEvent is the only server-side entry point
+import { after } from "next/server";
+import { captureServerEvent } from "@/lib/posthog-server";
 
-export const createPostHogServer = () =>
-  new PostHog(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
-    host: process.env.NEXT_PUBLIC_POSTHOG_HOST!,
-    flushAt: 1, // send immediately
-    flushInterval: 0, // no batching — Next.js functions are short-lived
-  });
-
-// Always use and shutdown in the same function
-const posthog = createPostHogServer();
-posthog.capture({
-  distinctId: userId,
-  event: "company_researched",
-  properties: { userId, jobId, company },
-});
-await posthog.shutdown(); // required — ensures event is sent
+after(() => captureServerEvent(userId, "company_researched", { jobId, company }));
 ```
+
+It creates a request-scoped client with `flushAt: 1` / `flushInterval: 0`, sends with
+`captureImmediate`, adds `userId` to the properties, bounds retries, and never throws.
+
+**Always wrap the call in `after()`.** `captureImmediate` resolves only once the event has been
+sent, so awaiting it inline puts PostHog's availability in front of the user's. Measured: awaiting
+it in the OAuth callback added **49 seconds** to sign-in against an endpoint that accepts the
+connection and never answers — 4 attempts at the library defaults (`fetchRetryCount: 3`,
+`fetchRetryDelay: 3000`, `requestTimeout: 10000`). `captureServerEvent` now bounds that to ~7s, and
+`after()` moves it off the response path entirely.
+
+**`await posthog.shutdown()` does not work in posthog-node 5.** `shutdown()` returns `void`, so
+awaiting it waits for nothing and the event is lost. `captureImmediate()` returns a promise that
+resolves once the event has actually been sent — that is the correct pattern for a short-lived
+Next handler, and it is what `captureServerEvent` uses.
 
 **Rules:**
 
-- Always call `await posthog.shutdown()` in server-side functions — events are lost without it
-- `flushAt: 1` and `flushInterval: 0` always set on server client
+- Server-side events always go through `captureServerEvent` — never construct `PostHog` at a call site
+- Always call it inside `after()` from `next/server` — never await it on the request path
+- Never rely on `await posthog.shutdown()` to flush — it is not a promise in v5
+- `captureImmediate` resolves even when delivery failed; the client's `on("error")` listener is the
+  only place a dropped server event surfaces
 - Event names must match exactly the list in `code-standards.md`
-- Always include `userId` as a property on every server-side event
-- Call `posthog.identify(userId)` after login on client side
-- Call `posthog.reset()` on logout on client side
+- `userId` is added to every server event by `captureServerEvent` — do not pass it again
+- `posthog.identify(userId)` runs in the root layout via `components/analytics/PostHogIdentity.tsx`
+- `posthog.reset()` runs in `components/auth/SignOutButton.tsx`, after the sign-out capture
+- The env variable is `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN`, not `NEXT_PUBLIC_POSTHOG_KEY`
 
 ---
 

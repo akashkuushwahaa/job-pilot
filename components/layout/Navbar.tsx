@@ -9,7 +9,15 @@ const NAV_ITEMS = [
   { label: "Profile", href: "/profile" },
 ] as const;
 
-export function Navbar() {
+type Props = {
+  ctaHref?: string;
+  ctaLabel?: string;
+};
+
+export function Navbar({
+  ctaHref = "/login",
+  ctaLabel = "Start for free",
+}: Props = {}) {
   return (
     <header className="w-full border-b border-border bg-surface">
       <div className="mx-auto flex h-16 w-full max-w-[1440px] items-center justify-between px-6">
@@ -36,8 +44,8 @@ export function Navbar() {
           ))}
         </nav>
 
-        <Link href="/login" className={buttonVariants({ size: "md" })}>
-          Start for free
+        <Link href={ctaHref} className={buttonVariants({ size: "md" })}>
+          {ctaLabel}
         </Link>
       </div>
     </header>

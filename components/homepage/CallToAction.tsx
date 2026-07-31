@@ -3,7 +3,15 @@ import { ArrowRight } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 
-export function CallToAction() {
+type Props = {
+  ctaHref?: string;
+  ctaLabel?: string;
+};
+
+export function CallToAction({
+  ctaHref = "/login",
+  ctaLabel = "Get started free",
+}: Props = {}) {
   return (
     <section className="bg-background pb-20">
       <div className="mx-auto w-full max-w-[1440px] px-6">
@@ -24,14 +32,14 @@ export function CallToAction() {
 
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
-                href="/login"
+                href={ctaHref}
                 className={buttonVariants({ variant: "inverse", size: "lg" })}
               >
-                Get started free
+                {ctaLabel}
                 <ArrowRight className="size-4" />
               </Link>
               <Link
-                href="/login"
+                href={ctaHref}
                 className={buttonVariants({
                   variant: "ghost",
                   size: "lg",

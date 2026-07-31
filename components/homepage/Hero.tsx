@@ -9,7 +9,15 @@ const TRUST_POINTS = [
   "No credit card needed",
 ] as const;
 
-export function Hero() {
+type Props = {
+  ctaHref?: string;
+  ctaLabel?: string;
+};
+
+export function Hero({
+  ctaHref = "/login",
+  ctaLabel = "Get started free",
+}: Props = {}) {
   return (
     <section className="relative overflow-hidden bg-surface">
       <div
@@ -39,12 +47,12 @@ export function Hero() {
         </p>
 
         <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row">
-          <Link href="/login" className={buttonVariants({ size: "lg" })}>
-            Get started free
+          <Link href={ctaHref} className={buttonVariants({ size: "lg" })}>
+            {ctaLabel}
             <ArrowRight className="size-4" />
           </Link>
           <Link
-            href="/login"
+            href={ctaHref}
             className={buttonVariants({ variant: "secondary", size: "lg" })}
           >
             Find your first match
