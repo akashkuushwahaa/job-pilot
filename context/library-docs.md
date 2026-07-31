@@ -545,58 +545,80 @@ const result = JSON.parse(response.choices[0].message.content!);
 
 ### Client Setup (Browser)
 
+Browser init lives in `instrumentation-client.ts` at the repo root — Next 16's client
+instrumentation hook, which runs after the document loads and before React hydrates. There is no
+`lib/posthog-client.ts` and no provider component; a provider would initialise strictly later.
+
 ```typescript
-// lib/posthog-client.ts
+// instrumentation-client.ts
 import posthog from "posthog-js";
 
-export function initPostHog() {
-  if (typeof window !== "undefined") {
-    posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
-      api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST!,
-      capture_pageview: false, // manual pageview tracking
-    });
-  }
-}
-
-// Capture event client-side
-posthog.capture("job_found", {
-  userId,
-  source: "search",
-  matchScore: score,
+posthog.init(process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN, {
+  api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
+  defaults: "2026-01-30",
+  capture_exceptions: true,
 });
+```
+
+Client components import the singleton directly:
+
+```typescript
+"use client";
+import posthog from "posthog-js";
+
+posthog.capture("job_search_started", { userId, jobTitle, location });
+```
+
+Whenever a capture is immediately followed by a navigation — a provider redirect, a Server Action
+that redirects — pass both `send_instantly` and the `sendBeacon` transport. `send_instantly` skips
+the batch queue; `sendBeacon` is the only transport the browser still delivers after the document
+unloads, so the event survives the navigation that an XHR would not.
+
+```typescript
+posthog.capture(
+  "user_signed_out",
+  { userId },
+  { send_instantly: true, transport: "sendBeacon" },
+);
 ```
 
 ### Server Setup
 
 ```typescript
-// lib/posthog-server.ts
-import { PostHog } from "posthog-node";
+// lib/posthog-server.ts — captureServerEvent is the only server-side entry point
+import { after } from "next/server";
+import { captureServerEvent } from "@/lib/posthog-server";
 
-export const createPostHogServer = () =>
-  new PostHog(process.env.NEXT_PUBLIC_POSTHOG_KEY!, {
-    host: process.env.NEXT_PUBLIC_POSTHOG_HOST!,
-    flushAt: 1, // send immediately
-    flushInterval: 0, // no batching — Next.js functions are short-lived
-  });
-
-// Always use and shutdown in the same function
-const posthog = createPostHogServer();
-posthog.capture({
-  distinctId: userId,
-  event: "company_researched",
-  properties: { userId, jobId, company },
-});
-await posthog.shutdown(); // required — ensures event is sent
+after(() => captureServerEvent(userId, "company_researched", { jobId, company }));
 ```
+
+It creates a request-scoped client with `flushAt: 1` / `flushInterval: 0`, sends with
+`captureImmediate`, adds `userId` to the properties, bounds retries, and never throws.
+
+**Always wrap the call in `after()`.** `captureImmediate` resolves only once the event has been
+sent, so awaiting it inline puts PostHog's availability in front of the user's. Measured: awaiting
+it in the OAuth callback added **49 seconds** to sign-in against an endpoint that accepts the
+connection and never answers — 4 attempts at the library defaults (`fetchRetryCount: 3`,
+`fetchRetryDelay: 3000`, `requestTimeout: 10000`). `captureServerEvent` now bounds that to ~7s, and
+`after()` moves it off the response path entirely.
+
+**`await posthog.shutdown()` does not work in posthog-node 5.** `shutdown()` returns `void`, so
+awaiting it waits for nothing and the event is lost. `captureImmediate()` returns a promise that
+resolves once the event has actually been sent — that is the correct pattern for a short-lived
+Next handler, and it is what `captureServerEvent` uses.
 
 **Rules:**
 
-- Always call `await posthog.shutdown()` in server-side functions — events are lost without it
-- `flushAt: 1` and `flushInterval: 0` always set on server client
+- Server-side events always go through `captureServerEvent` — never construct `PostHog` at a call site
+- Always call it inside `after()` from `next/server` — never await it on the request path
+- Never rely on `await posthog.shutdown()` to flush — it is not a promise in v5
+- `captureImmediate` resolves even when delivery failed; the client's `on("error")` listener is the
+  only place a dropped server event surfaces
 - Event names must match exactly the list in `code-standards.md`
-- Always include `userId` as a property on every server-side event
-- Call `posthog.identify(userId)` after login on client side
-- Call `posthog.reset()` on logout on client side
+- `userId` is added to every server event by `captureServerEvent` — do not pass it again
+- `posthog.identify(userId)` runs in the root layout via `components/analytics/PostHogIdentity.tsx`
+- `posthog.reset()` runs in `components/auth/SignOutButton.tsx`, after the sign-out capture
+- The env variable is `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN`, not `NEXT_PUBLIC_POSTHOG_KEY`
 
 ---
 

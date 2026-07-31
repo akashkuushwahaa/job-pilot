@@ -7,12 +7,11 @@ Update this file after every completed feature. Any AI agent reading this should
 ## Current Status
 
 **Phase:** Phase 1 — Foundation
-**Last completed:** 02 Auth — InsForge Google + GitHub OAuth, callback and refresh route handlers,
-`proxy.ts` route protection, sign out, and the auth-aware homepage CTA. Build, typecheck and lint
-are clean; route protection verified against the dev server. **The live OAuth round-trip has not
-been driven by a human yet** — see Notes.
-**Next:** 03 PostHog Initialization. `posthog.identify()` after login and `posthog.reset()` on
-logout hook into `actions/auth.ts`.
+**Last completed:** 03 PostHog Initialization — browser init in `instrumentation-client.ts`,
+`captureServerEvent` in `lib/posthog-server.ts`, identification in the root layout, and the three
+auth-lifecycle events. Build, typecheck and lint are clean. **No event has been observed arriving
+in PostHog** — see Notes.
+**Next:** 04 Database Schema.
 
 ---
 
@@ -22,7 +21,7 @@ logout hook into `actions/auth.ts`.
 
 - [x] 01 Homepage
 - [x] 02 Auth
-- [ ] 03 PostHog Initialization
+- [x] 03 PostHog Initialization
 - [ ] 04 Database Schema
 
 ### Phase 2 — Profile Page
@@ -172,6 +171,100 @@ logout hook into `actions/auth.ts`.
   directly against the backend: OAuth init accepts `http://localhost:3000/api/auth/callback` for
   both providers. That setting governs email link flows, which are out of scope here.
 
+### Feature 03 — PostHog Initialization
+
+- **`instrumentation-client.ts` replaces `lib/posthog-client.ts` and the provider.** `architecture.md`
+  and `build-plan.md` both specified a browser client module plus a provider in the root layout.
+  Next 16 has a file convention for exactly this — `instrumentation-client.ts` runs after the
+  document loads and *before* React hydrates, which is strictly earlier than any provider in the
+  tree can initialise. A `lib/posthog-client.ts` on top of it would be a module that exists only to
+  re-export the `posthog-js` singleton. Both context files corrected; the file was already in place
+  from an earlier `npx @posthog/wizard` run.
+- **`await posthog.shutdown()` is wrong in posthog-node 5.** `library-docs.md` carried it as a hard
+  rule ("events are lost without it"). In v5 `shutdown()` returns `void`, so awaiting it waits for
+  nothing — following that rule would have lost exactly the events it was meant to protect.
+  `captureServerEvent` uses `captureImmediate()`, which resolves only once the event has been sent.
+  Verified against a local listener: one gzipped POST to `/batch/` carrying
+  `user_signed_in` / `distinct_id` / `userId`, resolving in ~20ms after the response.
+- **The env variable is `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN`.** `code-standards.md` named
+  `NEXT_PUBLIC_POSTHOG_KEY`; PostHog's own Next.js guide and the already-populated `.env.local` both
+  use `PROJECT_TOKEN`. The docs were changed to follow the working configuration, not the reverse.
+- **Identity lives in the root layout, not in a page.** The wizard had put `posthog.identify()` in
+  `ComingSoon` — scaffolding that features 05, 09 and 14 delete, taking identification with it.
+  It moved to `components/analytics/PostHogIdentity.tsx`, rendered from `app/layout.tsx` whenever a
+  session exists. `ComingSoon` lost its `"use client"` and its `name` prop and is a Server
+  Component again.
+- **`getSessionUser()` is wrapped in React `cache()`.** The layout now resolves the session for
+  identification and the page still resolves it for authorization. Without memoisation that is two
+  InsForge round-trips on every authenticated render.
+- **`posthog.reset()` stays on the sign-out action, not on the identity component.** Resetting when
+  the layout sees no user would fire on every anonymous page load and mint a fresh anonymous ID each
+  time, which destroys anonymous funnels. `SignOutButton` owns the form so capture-then-reset
+  travels with sign-out when it moves into the navbar at feature 14.
+- **Three auth events added to the approved list; the four product events were not touched.**
+  `job_search_started`, `job_found`, `profile_completed` and `company_researched` measure actions
+  that do not exist yet — they belong to features 06, 10 and 13. The only real user actions today
+  are the auth lifecycle, so `oauth_sign_in_started`, `user_signed_in` and `user_signed_out` were
+  registered in `code-standards.md` first, then wired.
+- **`user_signed_in` is captured server-side in the OAuth callback**, not client-side on the
+  dashboard, so it fires once per sign-in rather than once per visit.
+- **`user_signed_in` deliberately carries no `provider`.** The callback URL does not know it, and
+  threading it through would mean a second OAuth cookie. `oauth_sign_in_started` carries it, the
+  anonymous→identified merge puts both events on one person, and a funnel breaks down by step one's
+  property. Do not add a provider cookie for this.
+- **`send_instantly: true` on both client captures.** Each is immediately followed by a navigation —
+  the provider redirect, and the sign-out Server Action's redirect. A queued event goes with the page.
+### Feature 03 — issues found by `/review` and fixed
+
+All eight review findings were addressed in the same session. What changed:
+
+- **Critical — analytics was on the auth critical path.** `await captureServerEvent(...)` in the
+  OAuth callback blocked the redirect. Measured against an endpoint that accepts the connection and
+  never answers: **49 seconds**, across 4 attempts at the library defaults — and `captureImmediate`
+  *resolves* rather than rejecting, so the `try/catch` never fired and no amount of error handling
+  would have helped. Fixed two ways: the call moved inside `after()` from `next/server` so it runs
+  once the response has gone, and `captureServerEvent` now sets `fetchRetryCount: 1`,
+  `fetchRetryDelay: 1000`, `requestTimeout: 3000`. Re-measured: **7 seconds**, off the response path.
+  Rule added to `architecture.md` invariants: never await a server capture on the request path.
+- **`captureImmediate` fails silently.** Because it resolves on delivery failure, a dropped server
+  event produced no log at all. `captureServerEvent` now attaches `posthog.on("error", …)`, which is
+  the only place that surfaces.
+- **The root layout was a single point of failure.** `getSessionUser()` deliberately does not catch,
+  and it now runs in `app/layout.tsx` — so an InsForge config or transport throw took down *every*
+  route. Added `getSessionUserForAnalytics()`, which catches: identity is not worth an outage, while
+  `requireUser()` in the page still fails loudly, so the blast radius is one route instead of all.
+- **That catch immediately reintroduced the feature-02 `DYNAMIC_SERVER_USAGE` trap.** The first
+  version swallowed Next's control-flow exception, hid the dynamic signal from the static probe, and
+  spammed the build log with stack traces. Fixed with `unstable_rethrow(error)` as the first
+  statement in the catch. Invariant added: every catch in a Server Component, Server Action or Route
+  Handler calls `unstable_rethrow` first.
+- **`app/global-error.tsx` was unstyled.** Raw `<h2>`/`<button>`, no tokens, and — because it
+  replaces the root layout — no `globals.css` and no font variable, so it rendered as browser-default
+  HTML. Now imports `globals.css`, pulls the font from the new `lib/fonts.ts`, and renders
+  `components/layout/ErrorState.tsx`.
+- **There was no route-level error boundary at all.** Added `app/error.tsx`, so a thrown page keeps
+  the layout instead of escalating to the document-replacing boundary. Both boundaries share
+  `ErrorState` and both call `posthog.captureException`.
+- **`lib/fonts.ts` extracted.** `global-error.tsx` renders its own `<html>` and inherits no
+  className, so `--font-inter` would have been undefined there and `--font-sans` would have silently
+  fallen back to a system font. One `next/font` instance now serves both.
+- **`.env.example` was invisible and incomplete.** `.gitignore`'s `.env*` matched it, so it was
+  untracked and would never have reached a clone or CI — while `posthog-setup-report.md` tells you to
+  configure deployments from it. Added `!.env.example`, and filled it with all five current variables
+  plus the four commented ones features 07–13 will need. Verified `git add` now accepts
+  `.env.example` and still refuses `.env.local`.
+- **Client events now use `transport: "sendBeacon"`** alongside `send_instantly`. Both captures are
+  immediately followed by a navigation, which cancels in-flight XHRs; sendBeacon is the only
+  transport the browser still delivers after unload.
+- **The `cache()` dedupe was measured, not assumed.** Temporarily instrumented `getSessionUser`, hit
+  `/` (two call sites: the layout and the page), and counted **one** body execution.
+
+Two review findings were closed without a code change: `lib/posthog-client.ts` not existing, and the
+three auth events being beyond build-plan 03's stated scope. Both are deliberate and documented above.
+
+- **`app/global-error.tsx` was kept rather than deleted**, but no longer as the wizard left it — see
+  the fixes above. Exception autocapture stays on in `instrumentation-client.ts`.
+
 ---
 
 ## Notes
@@ -187,6 +280,14 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
 - **`lib/insforge-client.ts` is intentionally unreferenced.** `architecture.md` prescribes it and
   feature 06 needs it for Storage and Realtime, so it stays rather than being deleted and re-added.
   It has never been exercised — treat it as unverified when feature 06 first imports it.
+- **Feature 03 is not fully verified either, and for the same reason.** What was verified: the
+  project token and host answer PostHog's flags endpoint with HTTP 200; the posthog-node call shape
+  sends a correct `/batch/` payload; the browser bundle contains a real `posthog.init`; the worst-case
+  server stall is 7s and off the response path; and the `cache()` dedupe is one call per request.
+  What was **not**: no `oauth_sign_in_started`, `user_signed_in`, `user_signed_out` or `$exception`
+  has ever been seen arriving in the PostHog project, because that needs the browser sign-in below.
+  Drive one sign-in and one sign-out, then check PostHog's Activity view before treating the events
+  as working. Neither error boundary has been triggered either — throw something on purpose once.
 - **Feature 02 is not fully verified.** Automated checks that passed: `/dashboard`, `/profile`,
   `/find-jobs` and `/find-jobs/[id]` all 307 to `/login` while signed out; `/login` renders both
   providers; the homepage CTAs resolve to `/login`; OAuth init returns a valid provider URL for

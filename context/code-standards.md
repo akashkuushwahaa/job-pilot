@@ -222,18 +222,36 @@ const insforge = await createInsforgeServer();
 
 All PostHog events must use these exact event names. Never invent new event names without adding them here first.
 
-| Event                | When                                       | Key Properties             |
-| -------------------- | ------------------------------------------ | -------------------------- |
-| `job_search_started` | Find Jobs button clicked                   | userId, jobTitle, location |
-| `job_found`          | Each job discovered and saved              | userId, source, matchScore |
-| `profile_completed`  | User saves complete profile for first time | userId                     |
-| `company_researched` | Company research dossier generated         | userId, jobId, company     |
+### Product events
 
-These four events are the only events in this project. Do not add more without updating this list first.
+| Event                | When                                       | Where  | Key Properties             |
+| -------------------- | ------------------------------------------ | ------ | -------------------------- |
+| `job_search_started` | Find Jobs button clicked                   | client | userId, jobTitle, location |
+| `job_found`          | Each job discovered and saved              | server | userId, source, matchScore |
+| `profile_completed`  | User saves complete profile for first time | server | userId                     |
+| `company_researched` | Company research dossier generated         | server | userId, jobId, company     |
 
 `job_found` powers the Jobs Found Over Time and Match Score Distribution dashboard charts.
 `company_researched` powers the Company Research Activity dashboard chart.
 Always fire these with correct properties.
+
+None of the four are wired yet — they belong to features 06, 10 and 13. Wire each one in the
+feature that creates the action it measures, never earlier.
+
+### Auth lifecycle events
+
+| Event                   | When                                | Where  | Key Properties |
+| ----------------------- | ----------------------------------- | ------ | -------------- |
+| `oauth_sign_in_started` | A provider button is submitted      | client | provider       |
+| `user_signed_in`        | The OAuth code exchange succeeded   | server | userId         |
+| `user_signed_out`       | The sign-out button is submitted    | client | userId         |
+
+`oauth_sign_in_started` fires before any identity exists, so it carries the anonymous distinct ID
+and no `userId`. `posthog.identify()` on the next authenticated render merges that anonymous ID
+into the real one, which is what lets `oauth_sign_in_started → user_signed_in` work as a funnel.
+Break that funnel down by step one's `provider` — that is why `user_signed_in` does not repeat it.
+
+These seven events are the only events in this project. Do not add more without updating this list first.
 
 ---
 
@@ -241,18 +259,21 @@ Always fire these with correct properties.
 
 All environment variables defined in `.env.local` for development. Never hardcode any key, URL, or secret anywhere in the codebase.
 
-| Variable                        | Used In                |
-| ------------------------------- | ---------------------- |
-| `NEXT_PUBLIC_INSFORGE_URL`      | read by the SDK itself |
-| `NEXT_PUBLIC_INSFORGE_ANON_KEY` | read by the SDK itself |
-| `NEXT_PUBLIC_APP_URL`           | actions/auth.ts        |
-| `BROWSERBASE_API_KEY`           | lib/browserbase.ts     |
-| `BROWSERBASE_PROJECT_ID`        | lib/browserbase.ts     |
-| `OPENAI_API_KEY`                | agent/ functions       |
-| `ADZUNA_APP_ID`                 | lib/adzuna.ts          |
-| `ADZUNA_APP_KEY`                | lib/adzuna.ts          |
-| `NEXT_PUBLIC_POSTHOG_KEY`       | lib/posthog-client.ts  |
-| `NEXT_PUBLIC_POSTHOG_HOST`      | lib/posthog-client.ts  |
+| Variable                            | Used In                                          |
+| ----------------------------------- | ------------------------------------------------ |
+| `NEXT_PUBLIC_INSFORGE_URL`          | read by the SDK itself                           |
+| `NEXT_PUBLIC_INSFORGE_ANON_KEY`     | read by the SDK itself                           |
+| `NEXT_PUBLIC_APP_URL`               | actions/auth.ts                                  |
+| `BROWSERBASE_API_KEY`               | lib/browserbase.ts                               |
+| `BROWSERBASE_PROJECT_ID`            | lib/browserbase.ts                               |
+| `OPENAI_API_KEY`                    | agent/ functions                                 |
+| `ADZUNA_APP_ID`                     | lib/adzuna.ts                                    |
+| `ADZUNA_APP_KEY`                    | lib/adzuna.ts                                    |
+| `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` | instrumentation-client.ts, lib/posthog-server.ts |
+| `NEXT_PUBLIC_POSTHOG_HOST`          | instrumentation-client.ts, lib/posthog-server.ts |
+
+The PostHog variable is `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN`, not `NEXT_PUBLIC_POSTHOG_KEY` — that
+is the name PostHog's own Next.js guide uses and the name already configured in `.env.local`.
 
 `NEXT_PUBLIC_` prefix means the variable is exposed to the browser. Never add `NEXT_PUBLIC_` to secret keys.
 

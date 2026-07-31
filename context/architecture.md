@@ -22,6 +22,7 @@
 ```
 /
 ├── AGENTS.md
+├── instrumentation-client.ts               → PostHog browser init (Next 16 client instrumentation)
 ├── context/
 │   ├── project-overview.md
 │   ├── architecture.md
@@ -33,7 +34,9 @@
 │   ├── build-plan.md
 │   └── progress-tracker.md
 ├── app/
-│   ├── layout.tsx                          → Root layout, PostHog provider
+│   ├── layout.tsx                          → Root layout, PostHog identity boundary
+│   ├── error.tsx                           → Route-level error boundary
+│   ├── global-error.tsx                    → Root-layout error boundary; renders its own <html>
 │   ├── page.tsx                            → Homepage
 │   ├── (auth)/
 │   │   └── login/
@@ -68,11 +71,15 @@
 │   └── jobs.ts                            → Job status updates
 ├── components/
 │   ├── ui/                                → shadcn/ui components only
+│   ├── analytics/
+│   │   └── PostHogIdentity.tsx             → Renders null; identifies the session user
 │   ├── auth/
-│   │   └── OAuthButton.tsx                 → Submit button with pending state
+│   │   ├── OAuthButton.tsx                 → Submit button with pending state
+│   │   └── SignOutButton.tsx               → Sign-out form; captures then resets PostHog
 │   ├── layout/
 │   │   ├── Navbar.tsx
 │   │   ├── Footer.tsx
+│   │   ├── ErrorState.tsx                  → Shared card for both error boundaries
 │   │   └── ComingSoon.tsx                  → Placeholder for unbuilt protected routes
 │   ├── homepage/
 │   │   ├── Hero.tsx
@@ -106,8 +113,8 @@
 │   ├── browserbase.ts                     → Browserbase session creation + management
 │   ├── stagehand.ts                       → Stagehand initialisation with Browserbase session
 │   ├── adzuna.ts                          → Adzuna API client
-│   ├── posthog-client.ts                  → PostHog browser client
-│   ├── posthog-server.ts                  → PostHog server client
+│   ├── posthog-server.ts                  → captureServerEvent — server-side PostHog capture
+│   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   └── utils.ts                           → Shared utility functions
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -338,6 +345,48 @@ server through `createAuthActions()`.
 
 ---
 
+## PostHog Pattern
+
+There is no `lib/posthog-client.ts` and no PostHog provider component. Next 16's
+`instrumentation-client.ts` runs after the document loads and before hydration, which is strictly
+earlier than a provider in the tree, so it owns browser init. Client components import the
+`posthog-js` singleton directly.
+
+```
+instrumentation-client.ts     posthog.init() — runs once, before React hydrates
+components/analytics/         posthog.identify() — root layout, whenever a session exists
+components/auth/SignOutButton posthog.capture() then posthog.reset()
+lib/posthog-server.ts         captureServerEvent() — every server-side event
+```
+
+Identification lives in the **root layout**, not in a page. Pages come and go — the stubs that hold
+`ComingSoon` are deleted by features 05, 09 and 14 — and identity that lives in a page disappears
+with it. `getSessionUser()` is wrapped in React `cache()` so the layout and the page share one
+InsForge round-trip per request.
+
+Server events go through `captureServerEvent(userId, event, properties)`, which uses
+`captureImmediate`, forces `userId` onto every event, bounds the retry budget, and reports delivery
+failures through the client's `error` listener rather than dropping them silently.
+
+**Server events are always called inside `after()` from `next/server`, never awaited inline.**
+`captureImmediate` resolves only once the event has been sent, so awaiting it on the request path
+puts PostHog's availability in front of the user's. Awaiting it inline in the OAuth callback was
+measured at 49s of added sign-in latency against an unresponsive endpoint — and because it resolves
+rather than rejecting, no `try/catch` would have caught it. `after()` runs the capture once the
+response has already gone.
+
+Error boundaries: `app/error.tsx` catches a thrown page and keeps the layout; `app/global-error.tsx`
+catches the root layout itself and therefore replaces the document, so it declares its own
+`<html>`, imports `globals.css`, and pulls the font from `lib/fonts.ts`. Both render
+`components/layout/ErrorState.tsx` and both call `posthog.captureException`.
+
+The root layout resolves the session through `getSessionUserForAnalytics()`, which catches. Identity
+is not worth taking every route down for; authorization still runs through `requireUser()` in the
+page, which does not catch. The catch calls `unstable_rethrow()` first so Next's control-flow
+exceptions still reach Next.
+
+---
+
 ## Browserbase Session Pattern
 
 ```typescript
@@ -428,4 +477,8 @@ Rules the AI agent must never violate:
 - Browserbase sessions are always closed with stagehand.close() when done — never leave sessions open.
 - Always scope InsForge queries to the current user_id — never query without a user filter.
 - Adzuna API always includes category=it-jobs — never search without this filter.
+- Every server-side PostHog event goes through `captureServerEvent` — never `new PostHog(...)` at a call site.
+- Every `captureServerEvent` call is wrapped in `after()` — never awaited on the request path.
+- PostHog event names only ever come from the table in code-standards.md — add the name there first.
+- Any `catch` in a Server Component, Server Action or Route Handler calls `unstable_rethrow(error)` first.
 - jobs.source is always 'search' or 'url' — never any other value.
