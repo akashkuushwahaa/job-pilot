@@ -36,36 +36,21 @@ Two separate instances — never mix them:
 
 ```typescript
 // lib/insforge-client.ts — browser context only
-import { createBrowserClient } from "@insforge/ssr";
+import { createBrowserClient } from "@insforge/sdk/ssr";
 
-export const insforge = createBrowserClient(
-  process.env.NEXT_PUBLIC_INSFORGE_URL!,
-  process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-);
+export const insforge = createBrowserClient();
 ```
 
 ```typescript
 // lib/insforge-server.ts — server context only
-import { createServerClient } from "@insforge/ssr";
 import { cookies } from "next/headers";
+import { createServerClient } from "@insforge/sdk/ssr";
 
-export const createInsforgeServer = async () => {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_INSFORGE_URL!,
-    process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
-          );
-        },
-      },
-    },
-  );
-};
+type InsforgeServerClient = ReturnType<typeof createServerClient>;
+
+export async function createInsforgeServer(): Promise<InsforgeServerClient> {
+  return createServerClient({ cookies: await cookies() });
+}
 ```
 
 **Rules:**
@@ -79,15 +64,24 @@ export const createInsforgeServer = async () => {
 
 ### Auth
 
+Never call `insforge.auth.getCurrentUser()` directly in a page — use the helpers in `lib/auth.ts`,
+which handle the error branch and Next's control-flow exceptions:
+
 ```typescript
-// Get current user in server context
-const insforge = await createInsforgeServer();
-const {
-  data: { user },
-  error,
-} = await insforge.auth.getUser();
-if (!user) redirect("/login");
+// Protected page — redirects to /login when there is no session
+import { requireUser } from "@/lib/auth";
+
+const user = await requireUser();
+
+// Public page that changes based on session — returns null when signed out
+import { getSessionUser } from "@/lib/auth";
+
+const user = await getSessionUser();
 ```
+
+The method is `getCurrentUser()`, not `getUser()`. Auth **mutations** (sign in, sign out, OAuth
+exchange) never run through these clients — they use `createAuthActions()` from `@insforge/sdk/ssr`
+in a Server Action or Route Handler, because only those can write cookies.
 
 ---
 
@@ -95,21 +89,21 @@ if (!user) redirect("/login");
 
 ```typescript
 // Read
-const { data, error } = await insforge
+const { data, error } = await insforge.database
   .from("jobs")
   .select("*")
   .eq("user_id", user.id)
   .order("found_at", { ascending: false });
 
-// Insert
-const { data, error } = await insforge
+// Insert — note the array
+const { data, error } = await insforge.database
   .from("jobs")
-  .insert({ user_id: user.id, title, company, match_score })
+  .insert([{ user_id: user.id, title, company, match_score }])
   .select()
   .single();
 
 // Update
-const { error } = await insforge
+const { error } = await insforge.database
   .from("jobs")
   .update({ company_research: dossier })
   .eq("id", jobId)
@@ -118,6 +112,8 @@ const { error } = await insforge
 
 **Rules:**
 
+- Table access is `insforge.database.from(...)` — there is no top-level `insforge.from(...)`
+- Inserts take an array: `.insert([{ ... }])`
 - Always scope queries to `user_id` — never query without user filter
 - Always handle the `error` return — never assume success
 - Use `.single()` when expecting exactly one row

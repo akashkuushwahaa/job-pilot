@@ -36,10 +36,8 @@
 │   ├── layout.tsx                          → Root layout, PostHog provider
 │   ├── page.tsx                            → Homepage
 │   ├── (auth)/
-│   │   ├── login/
-│   │   │   └── page.tsx                   → Login page
-│   │   └── callback/
-│   │       └── page.tsx                   → OAuth callback handler
+│   │   └── login/
+│   │       └── page.tsx                   → Login page
 │   ├── dashboard/
 │   │   └── page.tsx                       → Main dashboard
 │   ├── profile/
@@ -49,6 +47,9 @@
 │   │   └── [id]/
 │   │       └── page.tsx                   → Individual job details page
 │   └── api/
+│       ├── auth/
+│       │   ├── callback/route.ts          → OAuth code exchange, writes session cookies
+│       │   └── refresh/route.ts           → Access token refresh for the browser client
 │       ├── agent/
 │       │   ├── find/route.ts              → Trigger Adzuna job discovery
 │       │   └── research/route.ts          → Trigger company research agent
@@ -62,13 +63,17 @@
 │   ├── extractor.ts                       → GPT-4o job description extraction + structuring
 │   └── types.ts                           → Agent-specific TypeScript types
 ├── actions/
+│   ├── auth.ts                            → OAuth initiation + sign out
 │   ├── profile.ts                         → Profile save + update
 │   └── jobs.ts                            → Job status updates
 ├── components/
 │   ├── ui/                                → shadcn/ui components only
+│   ├── auth/
+│   │   └── OAuthButton.tsx                 → Submit button with pending state
 │   ├── layout/
 │   │   ├── Navbar.tsx
-│   │   └── Footer.tsx
+│   │   ├── Footer.tsx
+│   │   └── ComingSoon.tsx                  → Placeholder for unbuilt protected routes
 │   ├── homepage/
 │   │   ├── Hero.tsx
 │   │   ├── HowItWorks.tsx
@@ -93,9 +98,11 @@
 │       ├── JobDescription.tsx
 │       ├── CompanyResearch.tsx
 │       └── JobActions.tsx
+├── proxy.ts                                → Session refresh + optimistic route protection
 ├── lib/
 │   ├── insforge-client.ts                 → InsForge browser client instance
 │   ├── insforge-server.ts                 → InsForge server client
+│   ├── auth.ts                            → getSessionUser / requireUser, OAuth constants
 │   ├── browserbase.ts                     → Browserbase session creation + management
 │   ├── stagehand.ts                       → Stagehand initialisation with Browserbase session
 │   ├── adzuna.ts                          → Adzuna API client
@@ -116,7 +123,7 @@
 | `agent/`      | All agent logic. Adzuna discovery, company research, matching, extraction. Nothing here touches React. |
 | `actions/`    | Server Actions for UI-triggered mutations only. Profile save, profile update.                          |
 | `components/` | UI only. No data fetching logic. No direct DB calls.                                                   |
-| `lib/`        | Third party client initialisation and shared utilities only.                                           |
+| `lib/`        | Third party client initialisation, shared utilities, and session guards (`getSessionUser`, `requireUser`). |
 | `types/`      | TypeScript types shared across the project.                                                            |
 
 ---
@@ -293,7 +300,10 @@ Access: authenticated users only, own files only.
 - Methods: Google OAuth, GitHub OAuth
 - Protected routes: /dashboard, /profile, /find-jobs, /find-jobs/[id]
 - Public routes: /, /login
-- Middleware in middleware.ts checks session on every protected route
+- `proxy.ts` (Next 16's rename of middleware.ts) refreshes the session and does an optimistic
+  cookie check on protected routes
+- Every protected page additionally calls `requireUser()` from `lib/auth.ts` — proxy is an
+  optimisation, not the authorization boundary
 - On login → redirect to /dashboard
 
 ---
@@ -305,35 +315,26 @@ Two separate InsForge instances — never mix them:
 ```typescript
 // lib/insforge-client.ts
 // Browser-side — used in client components for auth state
-import { createBrowserClient } from "@insforge/ssr";
-export const insforge = createBrowserClient(
-  process.env.NEXT_PUBLIC_INSFORGE_URL!,
-  process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-);
+import { createBrowserClient } from "@insforge/sdk/ssr";
+
+export const insforge = createBrowserClient();
 
 // lib/insforge-server.ts
 // Server-side — used in API routes, Server Actions, agent code
-import { createServerClient } from "@insforge/ssr";
 import { cookies } from "next/headers";
+import { createServerClient } from "@insforge/sdk/ssr";
 
-export const createInsforgeServer = async () => {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_INSFORGE_URL!,
-    process.env.NEXT_PUBLIC_INSFORGE_ANON_KEY!,
-    {
-      cookies: {
-        getAll: () => cookieStore.getAll(),
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options),
-          );
-        },
-      },
-    },
-  );
-};
+type InsforgeServerClient = ReturnType<typeof createServerClient>;
+
+export async function createInsforgeServer(): Promise<InsforgeServerClient> {
+  return createServerClient({ cookies: await cookies() });
+}
 ```
+
+Both helpers read `NEXT_PUBLIC_INSFORGE_URL` and `NEXT_PUBLIC_INSFORGE_ANON_KEY` from the
+environment themselves — never pass credentials explicitly. The browser client's auth surface is
+read-only (`getCurrentUser`, `getProfile`, `getPublicAuthConfig`); every auth mutation runs on the
+server through `createAuthActions()`.
 
 ---
 

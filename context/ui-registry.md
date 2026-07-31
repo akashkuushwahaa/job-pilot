@@ -89,9 +89,108 @@ disabled:pointer-events-none disabled:opacity-50
 
 Icons inside buttons are `size-4` lucide icons; the base `gap-2` spaces them.
 
+### Login page — `app/(auth)/login/page.tsx`
+
+File: `app/(auth)/login/page.tsx`
+Last updated: 2026-07-31
+
+| Property         | Class                                                       |
+| ---------------- | ----------------------------------------------------------- |
+| Background       | `bg-background` (shell), `bg-surface` (card)                |
+| Border           | `border border-border`                                      |
+| Border radius    | `rounded-xl` (card), `rounded-md` (error banner)            |
+| Text — primary   | `text-base font-semibold text-text-primary` (heading)       |
+| Text — secondary | `text-sm leading-6 text-text-secondary` (lede)              |
+| Text — muted     | `text-xs leading-5 text-text-muted` (legal footnote)        |
+| Spacing          | `px-6 py-16` shell, `p-6` card, `mt-6` blocks, `gap-3` stack |
+| Hover state      | none — inherited from `Button`                              |
+| Shadow           | `shadow-sm`                                                 |
+| Accent usage     | none                                                        |
+
+**Pattern notes:**
+Uses the **Auth shell** primitive. No Navbar, no Footer — the `(auth)` group has no chrome.
+Heading is `text-base`, the documented section-heading step — not `text-xl`. App pages stay on the
+type scale in `ui-tokens.md`; only the landing page departs from it.
+
+**Error banner** (`role="alert"`) — the project's error recipe, reuse it everywhere:
+
+```
+rounded-md border border-error/30 bg-error/10 px-3 py-2 text-sm text-text-primary
+```
+
+Body copy stays `text-text-primary` rather than `text-error`: #EF4444 on the tinted background is
+about 3.7:1, under the 4.5:1 AA floor for body text. The error token carries the signal through the
+border and fill. Copy always comes from a message map — never a raw error string.
+
+Brand marks are module-local inline `svg` at `className="size-4" fill="currentColor"` — lucide
+carries no brand icons, and `currentColor` keeps them on-token with no hex.
+
+### OAuthButton — `components/auth/OAuthButton.tsx`
+
+File: `components/auth/OAuthButton.tsx`
+Last updated: 2026-07-31
+
+| Property         | Class                                                        |
+| ---------------- | ------------------------------------------------------------ |
+| Background       | inherited — `Button` `variant="secondary"`                   |
+| Border           | inherited — `border border-border`                           |
+| Border radius    | inherited — `rounded-md`                                     |
+| Text — primary   | inherited — `text-sm text-text-primary`                      |
+| Spacing          | `size="lg"` → `h-11 px-5`, full width via `className="w-full"` |
+| Hover state      | inherited — `hover:bg-surface-secondary`                     |
+| Disabled state   | inherited — `disabled:pointer-events-none disabled:opacity-50` |
+| Shadow           | none                                                         |
+| Accent usage     | none                                                         |
+
+**Pattern notes:**
+The only client component in the auth flow. `useFormStatus` disables the button and swaps the label
+to "Connecting to X…" while the Server Action runs. Takes `icon` as a rendered element, not a
+component — client component props must be serializable.
+
+Spinner is CSS, since lucide 1.28 ships no loader icon:
+
+```
+size-4 animate-spin rounded-full border-2 border-current border-t-transparent
+```
+
+`border-current` inherits the button's text colour, so it needs no token of its own. Reuse this
+spinner for any pending button rather than adding a spinner dependency.
+
+### ComingSoon — `components/layout/ComingSoon.tsx`
+
+File: `components/layout/ComingSoon.tsx`
+Last updated: 2026-07-31
+
+| Property         | Class                                                      |
+| ---------------- | ---------------------------------------------------------- |
+| Background       | `bg-background` (shell), `bg-surface` (card)               |
+| Border           | `border border-border`, divider `border-t border-border`   |
+| Border radius    | `rounded-xl`                                               |
+| Text — primary   | `text-base font-semibold text-text-primary` (heading)      |
+| Text — secondary | `text-sm leading-6 text-text-secondary`                    |
+| Text — muted     | `text-xs font-medium tracking-wider text-text-muted uppercase` (`dt`) |
+| Spacing          | `px-6 py-16` shell, `p-6` card, `mt-6` blocks, `pt-6` divider |
+| Hover state      | none — inherited from `Button`                             |
+| Shadow           | `shadow-sm`                                                |
+| Accent usage     | `text-xs font-medium tracking-widest text-accent uppercase` (eyebrow) |
+
+**Pattern notes:**
+Uses the **Auth shell** primitive. Throwaway scaffolding for routes that exist only to prove auth
+works — delete each usage as features 05, 09 and 14 land.
+
+Two uppercase label styles coexist deliberately and must not be merged: `tracking-widest` +
+`text-accent` is the **section eyebrow**; `tracking-wider` + `text-text-muted` is a **field label**
+(same as `DossierPreview`).
+
+Sign-out uses `Button variant="secondary"` at the default `md` size, not `lg` — it is a secondary
+action inside a card, whereas the login page's provider buttons are the primary action on the page.
+
 ### Navbar — `components/layout/Navbar.tsx`
 
 `h-16` white bar, `border-b border-border`, logo left, nav centre, primary CTA right.
+Takes optional `ctaHref` / `ctaLabel` (default `/login` + "Start for free") so the homepage can
+point the CTA at `/dashboard` for a signed-in visitor. `Hero` and `CallToAction` take the same
+two props with the same defaults.
 Nav items: `text-sm font-medium text-text-dark transition-colors hover:text-accent`.
 Nav collapses with `hidden md:flex` — logo and CTA stay visible on mobile.
 

@@ -243,8 +243,9 @@ All environment variables defined in `.env.local` for development. Never hardcod
 
 | Variable                        | Used In                |
 | ------------------------------- | ---------------------- |
-| `NEXT_PUBLIC_INSFORGE_URL`      | lib/insforge-client.ts |
-| `NEXT_PUBLIC_INSFORGE_ANON_KEY` | lib/insforge-client.ts |
+| `NEXT_PUBLIC_INSFORGE_URL`      | read by the SDK itself |
+| `NEXT_PUBLIC_INSFORGE_ANON_KEY` | read by the SDK itself |
+| `NEXT_PUBLIC_APP_URL`           | actions/auth.ts        |
 | `BROWSERBASE_API_KEY`           | lib/browserbase.ts     |
 | `BROWSERBASE_PROJECT_ID`        | lib/browserbase.ts     |
 | `OPENAI_API_KEY`                | agent/ functions       |
@@ -254,6 +255,12 @@ All environment variables defined in `.env.local` for development. Never hardcod
 | `NEXT_PUBLIC_POSTHOG_HOST`      | lib/posthog-client.ts  |
 
 `NEXT_PUBLIC_` prefix means the variable is exposed to the browser. Never add `NEXT_PUBLIC_` to secret keys.
+
+`NEXT_PUBLIC_INSFORGE_ANON_KEY` must be the **anon** key — it starts with `anon_`. InsForge's admin
+API key starts with `ik_`, is full-access (equivalent to a service role key), and is what sits in
+`.mcp.json` for the MCP server. Never put the `ik_` key in any `NEXT_PUBLIC_` variable. The `@insforge/sdk`
+SSR helpers read `NEXT_PUBLIC_INSFORGE_URL` and `NEXT_PUBLIC_INSFORGE_ANON_KEY` from the environment
+themselves, so `lib/insforge-client.ts` and `lib/insforge-server.ts` pass no credentials explicitly.
 
 ---
 
@@ -305,7 +312,8 @@ Never install a new package without a clear reason. Before installing anything c
 
 Approved dependencies for this project:
 
-- `@insforge/ssr` — InsForge client
+- `@insforge/sdk` — InsForge client (SSR helpers live at `@insforge/sdk/ssr` and
+  `@insforge/sdk/ssr/middleware`; there is no separate `@insforge/ssr` package)
 - `@browserbasehq/sdk` — Browserbase sessions
 - `@browserbasehq/stagehand` — AI browser control
 - `openai` — GPT-4o API
