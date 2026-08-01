@@ -1,30 +1,17 @@
-import Image from "next/image";
-import Link from "next/link";
-
-import { SignOutButton } from "@/components/auth/SignOutButton";
-
 type Props = {
   title: string;
   feature: string;
-  userId: string;
   email: string;
 };
 
-export function ComingSoon({ title, feature, userId, email }: Props) {
+// Throwaway scaffolding for routes that exist only to prove auth works — delete
+// each usage as features 09 and 14 land. It no longer carries the logo or the
+// sign-out button: AppNavbar sits above it and owns both.
+export function ComingSoon({ title, feature, email }: Props) {
   return (
     <main className="flex flex-1 items-center justify-center bg-background px-6 py-16">
       <div className="w-full max-w-md">
-        <Link href="/" className="flex items-center justify-center">
-          <Image
-            src="/logo.png"
-            alt="JobPilot"
-            width={496}
-            height={168}
-            className="h-7 w-auto"
-          />
-        </Link>
-
-        <div className="mt-8 rounded-xl border border-border bg-surface p-6 shadow-sm">
+        <div className="rounded-xl border border-border bg-surface p-6 shadow-sm">
           <p className="text-xs font-medium tracking-widest text-accent uppercase">
             {feature}
           </p>
@@ -44,8 +31,6 @@ export function ComingSoon({ title, feature, userId, email }: Props) {
               {email}
             </dd>
           </dl>
-
-          <SignOutButton userId={userId} className="mt-6" />
         </div>
       </div>
     </main>
