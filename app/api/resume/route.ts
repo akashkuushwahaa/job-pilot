@@ -25,6 +25,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const user = await requireUser();
 
+    // Checked before formData(), which buffers the entire body into memory. The
+    // real check is still the one on file.size below — Content-Length is a claim,
+    // not a fact — but it stops an oversized upload being read at all.
+    const declaredLength = Number(request.headers.get("content-length") ?? 0);
+
+    if (declaredLength > MAX_RESUME_BYTES) {
+      return failure("That file is larger than 5MB. Upload a smaller PDF.", 413);
+    }
+
     const formData = await request.formData();
     const file = formData.get("resume");
 
@@ -73,7 +82,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 }
 
-export async function GET(): Promise<NextResponse> {
+// GET is the one handler that does not return the { success, data?, error? }
+// envelope from code-standards.md. It is a link target, not a data endpoint —
+// the browser follows it straight to the PDF, so the success path has to be a
+// redirect and there is no body to wrap.
+export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const user = await requireUser();
     const insforge = await createInsforgeServer();
@@ -89,10 +102,13 @@ export async function GET(): Promise<NextResponse> {
       return failure("Could not open that resume. Please retry.", 500);
     }
 
-    const path: string | null = profile?.resume_path ?? null;
+    const stored: unknown = profile?.resume_path;
+    const path = typeof stored === "string" && stored.length > 0 ? stored : null;
 
+    // Reachable only by typing the URL — ResumePreview renders once a path
+    // exists. Send them to the page rather than a wall of JSON.
     if (!path) {
-      return failure("No resume has been uploaded yet.", 404);
+      return NextResponse.redirect(new URL("/profile", request.nextUrl.origin));
     }
 
     // Signed server-side, short-lived, and handed straight to the browser as a

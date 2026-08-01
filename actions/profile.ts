@@ -9,9 +9,9 @@ import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
 import { createInsforgeServer } from "@/lib/insforge-server";
 import { captureServerEvent } from "@/lib/posthog-server";
-import { toProfileRow } from "@/lib/profile";
+import { parseProfile, toFormValues, toProfileRow } from "@/lib/profile";
 import { MAX_WORK_EXPERIENCE } from "@/lib/utils";
-import type { Profile, ProfileFormValues } from "@/types";
+import type { ProfileFormValues } from "@/types";
 
 const SHORT_TEXT = 200;
 const LONG_TEXT = 2000;
@@ -57,7 +57,11 @@ const ProfileInput = z.object({
   preferred_locations: z.string().max(LONG_TEXT),
 });
 
-type SaveResult = { success: boolean; error?: string };
+type SaveResult = {
+  success: boolean;
+  error?: string;
+  values?: ProfileFormValues;
+};
 
 export async function saveProfile(
   values: ProfileFormValues,
@@ -90,10 +94,7 @@ export async function saveProfile(
       return { success: false, error: "Could not save your profile. Please retry." };
     }
 
-    // The SDK exposes PostgREST's builder untyped, so rows arrive as `any`. This
-    // is the one boundary where the row shape is asserted; everything downstream
-    // is typed off Profile.
-    const existingProfile: Profile | null = existing ?? null;
+    const existingProfile = parseProfile(existing);
 
     const before = completeness(existingProfile);
     const row = toProfileRow(parsed.data, user.id, user.email ?? "");
@@ -107,13 +108,14 @@ export async function saveProfile(
       return { success: false, error: "Could not save your profile. Please retry." };
     }
 
-    // resume_path is not part of `row`, so completeness is measured on the merge
-    // of what we just wrote over what was already there.
-    const saved = completeness({
+    // resume_path is not part of `row`, so the saved profile is the merge of what
+    // we just wrote over what was already there.
+    const savedProfile = {
       ...row,
       resume_path: existingProfile?.resume_path ?? null,
-      updated_at: new Date().toISOString(),
-    });
+    };
+
+    const saved = completeness(savedProfile);
 
     if (!before.isComplete && saved.isComplete) {
       after(() => captureServerEvent(user.id, "profile_completed"));
@@ -121,7 +123,11 @@ export async function saveProfile(
 
     revalidatePath("/profile");
 
-    return { success: true };
+    // Returned so the form can adopt the normalised values — trimmed strings,
+    // comma lists split, blank roles dropped — without being remounted. Keying
+    // the form on updated_at did that job before, but it also fired on a resume
+    // upload, which bumps the same column and wiped whatever was being typed.
+    return { success: true, values: toFormValues(savedProfile) };
   } catch (error) {
     unstable_rethrow(error);
     console.error("[actions/profile] saveProfile", error);

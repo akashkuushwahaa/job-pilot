@@ -415,6 +415,44 @@ Decisions:
   default, so this closes no live leak — it makes the guarantee a property of this repo rather than
   of a library default that can change under us.
 
+### Feature 06 — issues found by `/review` and fixed
+
+All eight findings resolved in the same session.
+
+- **Critical — uploading a resume discarded unsaved form edits.** `ProfileForm` was keyed on
+  `profile.updated_at` so it would re-seed after a save. But the resume upload upserts the same row,
+  the `profiles_updated_at` trigger bumps the column, `router.refresh()` re-renders, the key changes
+  and the form remounts — wiping whatever was part way through being typed. The key conflated "the
+  server has newer canonical data" with "any write touched this row". **`saveProfile` now returns the
+  normalised `values` and the form adopts them itself; the key is gone.** The plan specified that key
+  and it was wrong.
+- **Important — the success banner could never appear.** Same root cause: Next returns the
+  revalidated tree in the Server Action's single-roundtrip response, so the remount reset `status` to
+  null. Errors *did* show, because a failed save never revalidates — silent on success, loud on
+  failure. Fixed by the same change.
+- **Important — three `any` leaks at the database boundaries.** The SDK returns PostgREST rows as
+  `any`, and annotating the variable `Profile | null` only renamed the `any`; nothing was checked. A
+  comment even claimed the shape was "asserted" when it was not. Added `parseProfile(row: unknown)`
+  in `lib/profile.ts` — a zod schema with `.catch()` on every field, so one drifted column degrades
+  to its empty value instead of taking the page down. An absent row returns null; an unrecognisable
+  one throws rather than returning null, because rendering an empty form over a row we failed to read
+  invites the next save to blank it.
+- **Important — a malformed `education` object crashed the profile page.** `hasText` took
+  `string | null` and did `value.trim()`; an education object missing `degree` supplies `undefined`,
+  which sails past a null-only guard and throws. Now `typeof value === "string"`. jsonb is
+  structurally unchecked by Postgres, so nothing upstream guaranteed the shape.
+- **Minor** — `EMPTY_ROLE` / `EMPTY_EDUCATION` moved from `types/` (which `architecture.md` scopes to
+  types) into `lib/profile.ts`; `splitList` un-exported; `GET /api/resume`'s deviation from the
+  route-handler envelope documented in the file; a no-resume `GET` now redirects to `/profile`
+  instead of rendering raw JSON; and the 5MB limit gets a `Content-Length` pre-check so an oversized
+  body is refused before `formData()` buffers it into memory.
+
+**Verified by execution, not reasoning:** a temporary route (since deleted) ran `parseProfile` +
+`completeness` over nine row shapes — absent, healthy, `education` as `[]` / as a string / missing
+`degree`, a role missing keys, `skills: null`, an invalid enum, and `years_experience: "four"`. All
+nine returned rather than threw; the three `education` cases are the ones that previously crashed.
+The healthy row scored 60% with 4 missing, which is the correct 6-of-10.
+
 Verified statically: the three app enums match the DB CHECK constraints character for character;
 `education` is nullable with no default; `GET` and `POST /api/resume` and `/profile` all 307 to
 `/login` for an anonymous caller. That last one also proves `unstable_rethrow` is letting

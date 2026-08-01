@@ -10,14 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { toFormValues } from "@/lib/profile";
+import { EMPTY_ROLE, toFormValues } from "@/lib/profile";
 import { cn, MAX_WORK_EXPERIENCE } from "@/lib/utils";
-import {
-  EMPTY_ROLE,
-  type EducationEntry,
-  type Profile,
-  type ProfileFormValues,
-  type WorkExperienceEntry,
+import type {
+  EducationEntry,
+  Profile,
+  ProfileFormValues,
+  WorkExperienceEntry,
 } from "@/types";
 
 const EXPERIENCE_LEVEL_OPTIONS = [
@@ -115,14 +114,20 @@ export function ProfileForm({ profile, email }: Props) {
     startSaving(async () => {
       const result = await saveProfile(values);
 
-      setStatus(
-        result.success
-          ? { kind: "success", message: "Profile saved." }
-          : {
-              kind: "error",
-              message: result.error ?? "Could not save your profile.",
-            },
-      );
+      if (result.success) {
+        // Adopt what was actually stored — trimmed, comma lists split, blank
+        // roles dropped — so the form shows the row rather than the draft.
+        if (result.values) {
+          setValues(result.values);
+        }
+        setStatus({ kind: "success", message: "Profile saved." });
+        return;
+      }
+
+      setStatus({
+        kind: "error",
+        message: result.error ?? "Could not save your profile.",
+      });
     });
   }
 

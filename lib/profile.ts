@@ -1,12 +1,13 @@
+import { z } from "zod";
+
 import {
-  EMPTY_EDUCATION,
-  EMPTY_ROLE,
   EXPERIENCE_LEVELS,
   REMOTE_PREFERENCES,
   WORK_AUTHORIZATIONS,
   type EducationEntry,
   type ExperienceLevel,
   type Profile,
+  type ProfileFields,
   type ProfileFormValues,
   type RemotePreference,
   type WorkAuthorization,
@@ -17,9 +18,88 @@ import {
 // across two files they drift: a column added to one and forgotten in the other
 // is silent, because every field is optional on the way in.
 
-export type ProfileRow = Omit<Profile, "updated_at" | "resume_path">;
+export type ProfileRow = Omit<ProfileFields, "resume_path">;
 
-export function splitList(value: string): string[] {
+export const EMPTY_ROLE: WorkExperienceEntry = {
+  company: "",
+  title: "",
+  start_date: "",
+  end_date: "",
+  currently_working: false,
+  responsibilities: "",
+};
+
+export const EMPTY_EDUCATION: EducationEntry = {
+  degree: "",
+  field: "",
+  institution: "",
+  graduation_year: "",
+};
+
+const EducationSchema = z.object({
+  degree: z.string().catch(""),
+  field: z.string().catch(""),
+  institution: z.string().catch(""),
+  graduation_year: z.string().catch(""),
+});
+
+const RoleSchema = z.object({
+  company: z.string().catch(""),
+  title: z.string().catch(""),
+  start_date: z.string().catch(""),
+  end_date: z.string().nullable().catch(null),
+  currently_working: z.boolean().catch(false),
+  responsibilities: z.string().catch(""),
+});
+
+// The SDK hands back PostgREST rows as `any`. Annotating the variable would only
+// rename the `any`; this actually checks it. Every field carries `.catch()` so a
+// single drifted column degrades to its empty value instead of taking the page
+// down — jsonb in particular is structurally unchecked by Postgres, so nothing
+// upstream guarantees the shape of education or work_experience.
+const ProfileSchema = z.object({
+  id: z.string(),
+  full_name: z.string().nullable().catch(null),
+  email: z.string().nullable().catch(null),
+  phone: z.string().nullable().catch(null),
+  location: z.string().nullable().catch(null),
+  current_title: z.string().nullable().catch(null),
+  experience_level: z.enum(EXPERIENCE_LEVELS).nullable().catch(null),
+  years_experience: z.number().int().nullable().catch(null),
+  skills: z.array(z.string()).catch([]),
+  industries: z.array(z.string()).catch([]),
+  work_experience: z.array(RoleSchema).catch([]),
+  education: EducationSchema.nullable().catch(null),
+  job_titles_seeking: z.array(z.string()).catch([]),
+  remote_preference: z.enum(REMOTE_PREFERENCES).nullable().catch(null),
+  preferred_locations: z.array(z.string()).catch([]),
+  salary_expectation: z.string().nullable().catch(null),
+  linkedin_url: z.string().nullable().catch(null),
+  portfolio_url: z.string().nullable().catch(null),
+  work_authorization: z.enum(WORK_AUTHORIZATIONS).nullable().catch(null),
+  resume_path: z.string().nullable().catch(null),
+  updated_at: z.string().catch(""),
+});
+
+// Absent row -> null. Present but unrecognisable -> throw, never null: rendering
+// an empty form over a row we failed to read invites the next save to overwrite
+// real data with blanks.
+export function parseProfile(row: unknown): Profile | null {
+  if (row === null || row === undefined) {
+    return null;
+  }
+
+  const parsed = ProfileSchema.safeParse(row);
+
+  if (!parsed.success) {
+    console.error("[lib/profile] unreadable profiles row", parsed.error.issues);
+    throw new Error("Unreadable profile row");
+  }
+
+  return parsed.data;
+}
+
+function splitList(value: string): string[] {
   return value
     .split(",")
     .map((entry) => entry.trim())
@@ -75,7 +155,7 @@ function isMeaningfulEducation(education: EducationEntry): boolean {
   );
 }
 
-export function toFormValues(profile: Profile | null): ProfileFormValues {
+export function toFormValues(profile: ProfileFields | null): ProfileFormValues {
   if (profile === null) {
     return {
       full_name: "",
