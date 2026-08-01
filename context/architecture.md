@@ -77,10 +77,11 @@
 │   │   ├── OAuthButton.tsx                 → Submit button with pending state
 │   │   └── SignOutButton.tsx               → Sign-out form; captures then resets PostHog
 │   ├── layout/
-│   │   ├── Navbar.tsx
+│   │   ├── Navbar.tsx                       → Homepage chrome — nav + CTA
+│   │   ├── AppNavbar.tsx                    → Authenticated chrome — nav with active item
 │   │   ├── Footer.tsx
 │   │   ├── ErrorState.tsx                  → Shared card for both error boundaries
-│   │   └── ComingSoon.tsx                  → Placeholder for unbuilt protected routes
+│   │   └── ComingSoon.tsx                  → Placeholder card for unbuilt protected routes
 │   ├── homepage/
 │   │   ├── Hero.tsx
 │   │   ├── HowItWorks.tsx
@@ -90,10 +91,11 @@
 │   │   ├── RecentActivity.tsx
 │   │   └── AnalyticsCharts.tsx
 │   ├── profile/
-│   │   ├── ProfileForm.tsx
-│   │   ├── ResumeUpload.tsx
-│   │   ├── ResumePreview.tsx
-│   │   └── CompletionIndicator.tsx
+│   │   ├── ProfileForm.tsx                  → All five form sections; owns form state
+│   │   ├── TagInput.tsx                     → Skills and industries chip input
+│   │   ├── WorkExperienceCard.tsx           → One role's fields
+│   │   ├── ResumeUpload.tsx                 → The whole Resume card, not just the dropzone
+│   │   └── CompletionIndicator.tsx          → Attention banner + completion ring
 │   ├── find-jobs/
 │   │   ├── SearchControls.tsx
 │   │   ├── JobsTable.tsx
@@ -115,7 +117,8 @@
 │   ├── adzuna.ts                          → Adzuna API client
 │   ├── posthog-server.ts                  → captureServerEvent — server-side PostHog capture
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
-│   └── utils.ts                           → Shared utility functions
+│   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
+│   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
 ```
@@ -240,8 +243,12 @@ saves** — `actions/profile.ts` upserts on first save, so every read must handl
 Three columns from earlier drafts do not exist and must not be re-added:
 
 - **`is_complete`, and any completion-percentage or missing-fields column.** Completeness is derived
-  by one helper in `lib/`, so redefining "complete" never needs a backfill migration. A stored copy
-  would be a second source of truth that silently goes stale.
+  by `completeness(profile)` in `lib/completeness.ts`, so redefining "complete" never needs a
+  backfill migration. A stored copy would be a second source of truth that silently goes stale.
+  It reads ten fields — full name, email, phone, location, current title, experience level, years of
+  experience, at least one skill, at least one work-experience role with a company and title, and an
+  education entry with a degree, field and institution. Everything else on the row improves matching
+  without gating it. It takes `Profile | null` and returns `{ percent, missing, isComplete }`.
 - **`cover_letter_tone`.** Cover letter generation is out of scope.
 
 ### `agent_runs`
@@ -354,6 +361,10 @@ Policies do not replace grants — every table also has explicit
 - Every protected page additionally calls `requireUser()` from `lib/auth.ts` — proxy is an
   optimisation, not the authorization boundary
 - On login → redirect to /dashboard
+- **Every protected page renders `AppNavbar`.** There is no shared authenticated layout, so this is
+  a per-page responsibility and it is load-bearing: it is the only navigation between the protected
+  routes. `/dashboard` shipped without it once and left signed-in users unable to reach `/profile`
+  at all. `AppNavbar` also carries the app's only sign-out.
 
 ---
 

@@ -6,12 +6,12 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 1 — Foundation ✅ complete
-**Last completed:** 04 Database Schema — four tables, 12 indexes, grants and RLS applied to the live
-backend via `migrations/20260731164849_create-jobpilot-schema.sql`, plus the private `resumes`
-bucket. Anonymous access and the dedupe/upsert behaviour are both verified against the real backend;
-authenticated cross-user isolation is not — see Notes.
-**Next:** Phase 2 — 05 Profile Page (Full UI).
+**Phase:** Phase 2 — Profile Page, in progress
+**Last completed:** 05 Profile Page — Full UI. Every surface in `context/designs/profile.png` is
+built on mock data: completion banner with ring, resume card, and the five-section form. Six form
+primitives, `AppNavbar`, and `lib/completeness.ts` landed with it. No save logic — the form's
+`onSubmit` calls `preventDefault`.
+**Next:** Phase 2 — 06 Profile Save Logic.
 
 ---
 
@@ -26,7 +26,7 @@ authenticated cross-user isolation is not — see Notes.
 
 ### Phase 2 — Profile Page
 
-- [ ] 05 Profile Page — Full UI
+- [x] 05 Profile Page — Full UI
 - [ ] 06 Profile Save Logic
 - [ ] 07 AI Profile Extraction from Resume
 - [ ] 08 Resume PDF Generation from Profile
@@ -304,12 +304,98 @@ Implementation notes worth keeping:
   only because gitignore never applies to tracked paths — any *new* skill would have been invisible.
 - **`.insforge/` is gitignored** — `.insforge/project.json` holds a full-access admin key.
 
+### Feature 05 — Profile Page (Full UI)
+
+- **The shadcn CLI was still not run.** Feature 01 deferred it to "when feature 05 needs real
+  primitives (select, checkbox, dialog)". Feature 05 needs no dialog at all, and its select and
+  checkbox are native elements in the design — a native `<select>` with an absolutely positioned
+  `ChevronDown`, and a native checkbox tinted with `accent-accent`. Running `shadcn init` would have
+  rewritten `globals.css` with its own palette to buy two Radix dependencies this page does not use.
+  `code-standards.md` asks "is there a simpler native solution" first; here it is one. Six
+  primitives — `field`, `label`, `input`, `textarea`, `select`, `checkbox` — were hand-written in
+  shadcn's shape on project tokens, exactly as `Button` was. Revisit when a page genuinely needs a
+  dialog or a combobox.
+- **`completeness(profile)` reads ten fields.** Design-locked: the reference shows 70% with PHONE,
+  LOCATION and EDUCATION missing, which is only self-consistent at ten required fields. Listed in
+  `architecture.md`. Takes `Profile | null` so feature 06 can pass a missing row straight through.
+- **Filled inputs tint; empty ones stay white** — and the tint inverts inside a tinted container.
+  Read from the control's own `value`, so it needs no extra state and no validation styling. This is
+  the design's own signal for "what have I not filled in yet".
+- **`--color-error-dark` (#B42318) added.** The missing-field tags are red text on a red tint, which
+  measures 3.3:1 with `--color-error` — under the AA floor. `--color-error` stays a signal colour for
+  icons, borders and the ring; anything red that is *read* uses the new token at 5.8:1. Mirrors the
+  `--color-success` / `--color-success-foreground` pair already in the set.
+- **The navbar's active item gets an underline**, against `ui-rules.md`'s "colour change only". The
+  design draws it, and on a page this long it is what makes the active tab legible. `active` is a
+  prop rather than `usePathname()`, so `AppNavbar` stays a Server Component.
+- **Pages still own their chrome.** No shared authenticated layout and no `(app)` route group —
+  `architecture.md` has never had one. Every protected page renders `AppNavbar` itself.
+
+### Feature 05 — issues found by `/review` on the auth implementation, and fixed
+
+Reported symptom: after login you could not reach `/profile`.
+
+- **Root cause: no navigation on any authenticated page.** `/dashboard` and `/find-jobs` rendered
+  `ComingSoon`, the chrome-less auth shell, whose only links were the logo and Sign out. After login
+  you land on `/dashboard` and nothing on the page points at `/profile`. The homepage navbar had the
+  links but was `hidden md:flex`, so under 768px there was no route to `/profile` from anywhere.
+  Fixed: both stub pages now render `AppNavbar`, and the homepage nav collapses at `sm` instead of
+  `md`. `AppNavbar` on every protected page is now an invariant in `architecture.md` — it is the
+  only navigation between them, so a protected page without it is a dead end.
+- **Feature 05 had removed the app's only sign-out from `/profile`.** `ComingSoon` owned it, and the
+  new profile page does not use `ComingSoon`. `SignOutButton` moved into `AppNavbar` — where the
+  registry always said it belonged from feature 14 — and gained `variant` / `fullWidth` props for
+  the navbar's compact ghost treatment. `ComingSoon` lost its logo and sign-out to avoid a second
+  header under the navbar, so it is no longer an Auth shell user.
+- **The homepage secondary CTAs ignored the session.** Both "Find your first match" buttons pointed
+  at `ctaHref`, so signed in all four homepage buttons went to `/dashboard` — the label was a lie.
+  `Hero` and `CallToAction` now take `secondaryHref`, which is `/find-jobs` with a session and
+  `/login` without. The primary CTA branching was already correct and was not the reported problem.
+
+**Reported, not fixed — awaiting a call:**
+
+- **Critical: the `unstable_rethrow` invariant is violated in three catches** — `startOAuth` and
+  `clearSession` in `actions/auth.ts`, and the outer catch in `app/api/auth/callback/route.ts`.
+  `redirect()` is called outside the try in both actions so `NEXT_REDIRECT` is not currently
+  swallowed, but `cookies()` inside those try blocks can raise Next control-flow exceptions. This is
+  the same trap features 02 and 03 each hit once.
+- **Minor: the OAuth code-verifier cookie survives a failed exchange.** `loginRedirect` returns
+  without deleting `OAUTH_CODE_VERIFIER_COOKIE`, leaving a stale verifier for up to 10 minutes. The
+  next attempt overwrites it, so this is hygiene rather than a defect.
+- **Minor: signed-out visitors see the homepage app-nav links**, which 307 straight back to
+  `/login`.
+- **Cover Letter Tone was not built.** `build-plan.md` feature 05 lists it under Job Preferences, but
+  feature 04 dropped the column and cover letters are out of scope. The design does not show it
+  either — the build plan is the stale one.
+- **Resume copy reworded.** The design's "generate a new tailored one" advertises resume tailoring,
+  which `project-overview.md` puts out of scope. Same call as feature 01's `agnet-log.png`.
+- **Remove role added, not in the design.** Add role with no remove is a dead end. Rendered only
+  when more than one role exists.
+- **`ResumePreview.tsx` was not built.** `architecture.md` lists it, but there is no resume to
+  preview until feature 06 uploads one and no state in the design shows it. It lands with the
+  signed-URL render in feature 06.
+
 ---
 
 ## Notes
 
 _Add notes here as the build progresses — workarounds, patterns, anything that differs from the context files._
 
+- **Feature 05 is UI only, and three controls are deliberately inert.** "Save Profile" submits a form
+  whose `onSubmit` calls `preventDefault` (feature 06), "Generate Resume from Profile" has no handler
+  (feature 08), and a selected resume file is held in component state and never uploaded (feature 06).
+  The completion ring reads the *saved* profile, not live form state, so it will not move while
+  typing — feature 06 recomputes it after `revalidatePath`.
+- **`app/profile/page.tsx` holds a `mockProfile()` function.** Delete it in feature 06 and replace it
+  with a real read; it returns exactly the design's data so the page can be diffed against
+  `context/designs/profile.png`. Email is already real — it comes from `requireUser()`.
+- **Verified for feature 05:** `npx tsc --noEmit`, `npm run lint` and `npm run build` all clean;
+  every route still `ƒ`. `/profile` still 307s to `/login` while signed out. The rendered markup was
+  checked through a temporary unauthenticated preview route (since deleted): 70% ring with the three
+  expected missing-field tags, all five sections, and the generated CSS actually contains
+  `text-error-dark`, `stroke-error/15`, `bg-error/10` and `accent-accent` rather than dropping them.
+  **Not verified: the page in a browser.** Nothing has been clicked — drag-and-drop, tag add/remove,
+  add/remove role, and the currently-working checkbox have only been reasoned about, not exercised.
 - **Unresolved drift, Phase 5.** `build-plan.md` feature 14 lists a "Cover Letters Generated" stat
   card and a "Resume Tailoring Activity" chart, but `project-overview.md` puts cover letters and
   resume tailoring out of scope and names the four cards as Total Jobs Found / Avg. Match Rate /

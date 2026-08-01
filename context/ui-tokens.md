@@ -92,6 +92,7 @@ className="bg-purple-500 text-gray-600"
 
   /* Error — red */
   --color-error: #ef4444;
+  --color-error-dark: #b42318;
   --color-error-foreground: #ffffff;
 
   /* LinkedIn brand */
@@ -163,6 +164,16 @@ Match score bars and indicators use gradient stops based on score range:
 | 70-89%      | Green  | `text-success` / `bg-success-light`    |
 | 50-69%      | Orange | `text-warning`                         |
 | Below 50%   | Gray   | `text-text-muted`                      |
+
+### Error Text on a Tinted Surface
+
+`--color-error` (#EF4444) is a **signal** colour, not a text colour. On a `bg-error/10` surface it
+measures 3.3:1 — under the 4.5:1 AA floor. Anything red that has to be *read* uses
+`text-error-dark` (#B42318), which measures 5.8:1 on the same surface. `--color-error` itself stays
+on icons, borders, fills and progress strokes, where the 3:1 graphical floor applies.
+
+This mirrors the green pair already in the token set: `--color-success` fills, `--color-success-foreground`
+(#007A55) is the text on top of it.
 
 ### Skills Badges
 
