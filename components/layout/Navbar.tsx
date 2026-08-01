@@ -32,7 +32,7 @@ export function Navbar({
           />
         </Link>
 
-        <nav className="hidden items-center gap-8 md:flex">
+        <nav className="hidden items-center gap-6 sm:flex lg:gap-8">
           {NAV_ITEMS.map((item) => (
             <Link
               key={item.href}

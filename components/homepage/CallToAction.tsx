@@ -6,11 +6,13 @@ import { buttonVariants } from "@/components/ui/button";
 type Props = {
   ctaHref?: string;
   ctaLabel?: string;
+  secondaryHref?: string;
 };
 
 export function CallToAction({
   ctaHref = "/login",
   ctaLabel = "Get started free",
+  secondaryHref = "/login",
 }: Props = {}) {
   return (
     <section className="bg-background pb-20">
@@ -39,7 +41,7 @@ export function CallToAction({
                 <ArrowRight className="size-4" />
               </Link>
               <Link
-                href={ctaHref}
+                href={secondaryHref}
                 className={buttonVariants({
                   variant: "ghost",
                   size: "lg",

@@ -12,11 +12,13 @@ const TRUST_POINTS = [
 type Props = {
   ctaHref?: string;
   ctaLabel?: string;
+  secondaryHref?: string;
 };
 
 export function Hero({
   ctaHref = "/login",
   ctaLabel = "Get started free",
+  secondaryHref = "/login",
 }: Props = {}) {
   return (
     <section className="relative overflow-hidden bg-surface">
@@ -52,7 +54,7 @@ export function Hero({
             <ArrowRight className="size-4" />
           </Link>
           <Link
-            href={ctaHref}
+            href={secondaryHref}
             className={buttonVariants({ variant: "secondary", size: "lg" })}
           >
             Find your first match

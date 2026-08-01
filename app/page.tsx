@@ -14,17 +14,28 @@ export default async function HomePage() {
   const ctaHref = user ? "/dashboard" : "/login";
   const navCtaLabel = user ? "Go to dashboard" : "Start for free";
   const heroCtaLabel = user ? "Go to dashboard" : "Get started free";
+  // "Find your first match" is a different destination once there is a session —
+  // sending both buttons to /dashboard makes the label a lie.
+  const secondaryHref = user ? "/find-jobs" : "/login";
 
   return (
     <>
       <Navbar ctaHref={ctaHref} ctaLabel={navCtaLabel} />
       <main className="flex-1">
-        <Hero ctaHref={ctaHref} ctaLabel={heroCtaLabel} />
+        <Hero
+          ctaHref={ctaHref}
+          ctaLabel={heroCtaLabel}
+          secondaryHref={secondaryHref}
+        />
         <ProductPreview />
         <HowItWorks />
         <Features />
         <Testimonial />
-        <CallToAction ctaHref={ctaHref} ctaLabel={heroCtaLabel} />
+        <CallToAction
+          ctaHref={ctaHref}
+          ctaLabel={heroCtaLabel}
+          secondaryHref={secondaryHref}
+        />
       </main>
       <Footer />
     </>
