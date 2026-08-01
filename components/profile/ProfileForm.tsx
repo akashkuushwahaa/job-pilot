@@ -1,16 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { Plus } from "lucide-react";
 
+import { saveProfile } from "@/actions/profile";
 import { TagInput } from "@/components/profile/TagInput";
 import { WorkExperienceCard } from "@/components/profile/WorkExperienceCard";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { MAX_WORK_EXPERIENCE } from "@/lib/utils";
-import type { EducationEntry, Profile, WorkExperienceEntry } from "@/types";
+import { toFormValues } from "@/lib/profile";
+import { cn, MAX_WORK_EXPERIENCE } from "@/lib/utils";
+import {
+  EMPTY_ROLE,
+  type EducationEntry,
+  type Profile,
+  type ProfileFormValues,
+  type WorkExperienceEntry,
+} from "@/types";
 
 const EXPERIENCE_LEVEL_OPTIONS = [
   { value: "junior", label: "Junior" },
@@ -42,73 +50,6 @@ const DEGREE_OPTIONS = [
   "Self-taught",
 ] as const;
 
-const EMPTY_ROLE: WorkExperienceEntry = {
-  company: "",
-  title: "",
-  start_date: "",
-  end_date: "",
-  currently_working: false,
-  responsibilities: "",
-};
-
-const EMPTY_EDUCATION: EducationEntry = {
-  degree: "",
-  field: "",
-  institution: "",
-  graduation_year: "",
-};
-
-// Every control is a string here even where the column is not. The form owns the
-// display shape; feature 06 owns the mapping back to the row — text[] columns are
-// entered as one comma-separated field and split on save.
-type ProfileFormValues = {
-  full_name: string;
-  email: string;
-  phone: string;
-  location: string;
-  linkedin_url: string;
-  portfolio_url: string;
-  work_authorization: string;
-  current_title: string;
-  experience_level: string;
-  years_experience: string;
-  skills: string[];
-  industries: string[];
-  work_experience: WorkExperienceEntry[];
-  education: EducationEntry;
-  job_titles_seeking: string;
-  remote_preference: string;
-  salary_expectation: string;
-  preferred_locations: string;
-};
-
-function toFormValues(profile: Profile): ProfileFormValues {
-  return {
-    full_name: profile.full_name ?? "",
-    email: profile.email ?? "",
-    phone: profile.phone ?? "",
-    location: profile.location ?? "",
-    linkedin_url: profile.linkedin_url ?? "",
-    portfolio_url: profile.portfolio_url ?? "",
-    work_authorization: profile.work_authorization ?? "",
-    current_title: profile.current_title ?? "",
-    experience_level: profile.experience_level ?? "",
-    years_experience:
-      profile.years_experience === null ? "" : String(profile.years_experience),
-    skills: profile.skills,
-    industries: profile.industries,
-    work_experience:
-      profile.work_experience.length > 0
-        ? profile.work_experience
-        : [EMPTY_ROLE],
-    education: profile.education ?? EMPTY_EDUCATION,
-    job_titles_seeking: profile.job_titles_seeking.join(", "),
-    remote_preference: profile.remote_preference ?? "",
-    salary_expectation: profile.salary_expectation ?? "",
-    preferred_locations: profile.preferred_locations.join(", "),
-  };
-}
-
 type SectionProps = {
   title: string;
   action?: React.ReactNode;
@@ -127,14 +68,22 @@ function Section({ title, action, children }: SectionProps) {
   );
 }
 
+type Status = { kind: "error" | "success"; message: string } | null;
+
 type Props = {
-  profile: Profile;
+  profile: Profile | null;
+  email: string;
 };
 
-export function ProfileForm({ profile }: Props) {
-  const [values, setValues] = useState<ProfileFormValues>(() =>
-    toFormValues(profile),
-  );
+export function ProfileForm({ profile, email }: Props) {
+  const [values, setValues] = useState<ProfileFormValues>(() => ({
+    ...toFormValues(profile),
+    // Shown disabled and always written from the session — the row's own email
+    // column is only a copy, and on a first save there is no row to copy from.
+    email,
+  }));
+  const [status, setStatus] = useState<Status>(null);
+  const [isSaving, startSaving] = useTransition();
 
   function setValue<Key extends keyof ProfileFormValues>(
     key: Key,
@@ -159,12 +108,29 @@ export function ProfileForm({ profile }: Props) {
     }));
   }
 
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    setStatus(null);
+
+    startSaving(async () => {
+      const result = await saveProfile(values);
+
+      setStatus(
+        result.success
+          ? { kind: "success", message: "Profile saved." }
+          : {
+              kind: "error",
+              message: result.error ?? "Could not save your profile.",
+            },
+      );
+    });
+  }
+
   const canAddRole = values.work_experience.length < MAX_WORK_EXPERIENCE;
 
   return (
     <form
-      // Feature 06 replaces this with the saveProfile Server Action.
-      onSubmit={(event) => event.preventDefault()}
+      onSubmit={handleSubmit}
       className="rounded-xl border border-border bg-surface p-6 shadow-sm"
     >
       <div className="space-y-8">
@@ -485,8 +451,27 @@ export function ProfileForm({ profile }: Props) {
         </Section>
       </div>
 
-      <Button type="submit" size="lg" className="mt-8 h-12 w-full">
-        Save Profile
+      {status ? (
+        <p
+          role={status.kind === "error" ? "alert" : "status"}
+          className={cn(
+            "mt-8 rounded-md border px-3 py-2 text-sm text-text-primary",
+            status.kind === "error"
+              ? "border-error/30 bg-error/10"
+              : "border-success/30 bg-success-lightest",
+          )}
+        >
+          {status.message}
+        </p>
+      ) : null}
+
+      <Button
+        type="submit"
+        size="lg"
+        disabled={isSaving}
+        className={cn("h-12 w-full", status ? "mt-4" : "mt-8")}
+      >
+        {isSaving ? "Saving…" : "Save Profile"}
       </Button>
     </form>
   );

@@ -4,54 +4,29 @@ import { ProfileForm } from "@/components/profile/ProfileForm";
 import { ResumeUpload } from "@/components/profile/ResumeUpload";
 import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
+import { createInsforgeServer } from "@/lib/insforge-server";
 import type { Profile } from "@/types";
-
-// Mock data. Feature 06 replaces this with a read from the profiles table —
-// which returns no row until the first save, so that read must handle null and
-// pass it straight through to completeness().
-function mockProfile(userId: string, email: string): Profile {
-  return {
-    id: userId,
-    full_name: "Faizan Ali",
-    email,
-    phone: null,
-    location: null,
-    current_title: "Frontend Engineer",
-    experience_level: "junior",
-    years_experience: 4,
-    skills: ["React", "TypeScript", "Next.js", "Tailwind CSS"],
-    industries: [],
-    work_experience: [
-      {
-        company: "Vercel",
-        title: "Frontend Engineer",
-        start_date: "2022-01",
-        end_date: null,
-        currently_working: true,
-        responsibilities:
-          "Built Next.js features and optimized web vitals. Led a team of 3 developers.",
-      },
-    ],
-    education: {
-      degree: "High School",
-      field: "Computer Science",
-      institution: "",
-      graduation_year: "",
-    },
-    job_titles_seeking: ["Frontend Engineer", "React Developer"],
-    remote_preference: "any",
-    preferred_locations: [],
-    salary_expectation: null,
-    linkedin_url: "https://linkedin.com/in/faizan",
-    portfolio_url: "https://github.com/jsmastery",
-    work_authorization: "citizen",
-    resume_path: null,
-  };
-}
 
 export default async function ProfilePage() {
   const user = await requireUser();
-  const profile = mockProfile(user.id, user.email ?? "");
+  const insforge = await createInsforgeServer();
+
+  // There is no row until the first save — maybeSingle() returns null rather than
+  // erroring, and completeness() takes null directly.
+  const { data, error } = await insforge.database
+    .from("profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  // Deliberately fatal. Degrading a read failure to "no profile" would render an
+  // empty form over real saved data, and the next save would overwrite it.
+  if (error) {
+    console.error("[profile/page] read failed", error);
+    throw new Error("Profile unavailable");
+  }
+
+  const profile: Profile | null = data ?? null;
   const { percent, missing, isComplete } = completeness(profile);
 
   return (
@@ -65,8 +40,14 @@ export default async function ProfilePage() {
             missing={missing}
             isComplete={isComplete}
           />
-          <ResumeUpload />
-          <ProfileForm profile={profile} />
+          <ResumeUpload resumePath={profile?.resume_path ?? null} />
+          {/* Re-seeds form state from the saved row after every successful save —
+              useState's initializer does not re-run on its own. */}
+          <ProfileForm
+            key={profile?.updated_at ?? "new"}
+            profile={profile}
+            email={user.email ?? ""}
+          />
         </div>
       </main>
     </>
