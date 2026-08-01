@@ -637,6 +637,12 @@ Body copy stays `text-text-primary` in both, for the same contrast reason as the
 `email` comes in as its own prop, not from the profile row — on a first save there is no row to read
 it from, and the field is disabled because the server always writes the session's address.
 
+**Never key this component on `updated_at`.** It was, so that a save would re-seed state from the
+canonical row — but a resume upload writes the same row, the `updated_at` trigger fires,
+`router.refresh()` remounts the form and everything typed so far is gone. It also reset the status
+banner, so a successful save showed nothing. `saveProfile` returns the normalised values and the form
+adopts them with `setValues`; there is no key.
+
 Card heading (`Profile Information`) is `text-base font-semibold`; section headings inside it are
 `text-sm font-semibold`. Two levels, matching the type scale — app pages never depart from it.
 

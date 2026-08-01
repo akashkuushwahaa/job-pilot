@@ -119,7 +119,7 @@
 │   ├── posthog-server.ts                  → captureServerEvent — server-side PostHog capture
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
-│   ├── profile.ts                         → Both directions of the profiles row <-> form mapping
+│   ├── profile.ts                         → parseProfile + both directions of the row <-> form mapping
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -538,6 +538,8 @@ await stagehand.close();
 Rules the AI agent must never violate:
 
 - API routes contain no UI logic. Components contain no DB logic.
+- Every `profiles` row read goes through `parseProfile()` — never annotate an SDK result as a typed
+  row, because `any` is assignable to anything and the annotation checks nothing.
 - Agent code in `/agent` never imports from `/components` or `/actions`.
 - Server Actions never call agent functions. Agent functions are only called from API routes.
 - All InsForge server-side writes use `createInsforgeServer()` — never the browser client.
