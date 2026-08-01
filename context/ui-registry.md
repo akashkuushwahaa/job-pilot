@@ -76,9 +76,26 @@ Three coexist deliberately. They are not interchangeable and must not be merged.
 | `text-xs font-medium tracking-widest text-accent uppercase`          | **Section eyebrow** — above a section heading              |
 | `text-xs font-medium tracking-wider text-text-muted uppercase`       | **Display field label** — `dl` keys in DossierPreview etc. |
 | `text-xs font-semibold tracking-wide text-text-dark uppercase`       | **Form field label** — every `<label>` on a form control   |
+| `text-xs font-semibold tracking-wide text-error-dark uppercase`      | **Missing-field tag** — `CompletionIndicator` only         |
 
 A form label has to carry more weight than a read-only one: it is the click target for its control
 and the thing a user scans when hunting for the field they still have to fill.
+
+The missing-field tag is the form-label recipe re-coloured on purpose, not a fourth geometry — it
+names the same fields the labels do, so it has to read as the same kind of thing.
+
+### Focus states
+
+Two recipes, split by input type. Both are `ring-1 ring-accent`; only the trigger differs.
+
+```
+buttons, links, icon buttons:  focus-visible:ring-1 focus-visible:ring-accent focus-visible:outline-none
+form controls (fieldSurface):  focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none
+```
+
+`focus-visible` on anything clicked, so a mouse press does not leave a ring behind. Plain `focus` on
+text controls, where you need to see where you are typing however you got there. `fieldSurface` also
+moves its border to accent — a ring alone reads as weaker than the 1px border already drawn.
 
 ### Decorative glow / dot grid
 
@@ -378,6 +395,10 @@ Centred stack on `bg-surface` with the dot grid and accent glow layers.
 - Headline: `text-4xl leading-[1.08] font-bold tracking-tight text-text-primary sm:text-5xl lg:text-6xl`, second line in `text-accent`
 - Trust row: `text-xs text-text-muted` with `size-1 rounded-full bg-text-muted` separators
 
+Takes `ctaHref` / `ctaLabel` / `secondaryHref`. The two buttons are **different destinations**, not
+one link twice: signed in the primary goes to `/dashboard` and "Find your first match" goes to
+`/find-jobs`. They pointed at the same href once and the secondary label was a lie.
+
 ### ProductPreview — `components/homepage/ProductPreview.tsx`
 
 `dashboard-demo.png` in a framed card, `max-w-5xl`, accent glow behind, and a
@@ -430,6 +451,8 @@ On dark, light text comes from the surface token, not a new colour:
 `text-surface` for the heading, `text-surface/70` for body copy.
 Secondary button on dark overrides ghost with `border border-surface/20 text-surface hover:bg-surface/10`.
 
+Takes `ctaHref` / `ctaLabel` / `secondaryHref`, same split as `Hero`.
+
 ### CompletionIndicator — `components/profile/CompletionIndicator.tsx`
 
 File: `components/profile/CompletionIndicator.tsx`
@@ -475,6 +498,35 @@ Owns the whole Resume card, not just the dropzone: heading, dropzone, divider, g
 
 Reuse the icon-only close recipe for any bare icon button.
 
+Takes `resumePath: string | null`. With no resume it shows the dropzone; with one it shows
+`ResumePreview` and swaps back to the dropzone while `isReplacing`. Selecting a file uploads
+immediately to `POST /api/resume`, then `router.refresh()` — the stored path lives on the
+server-rendered row, so the card only updates once the page data is refetched.
+
+### ResumePreview — `components/profile/ResumePreview.tsx`
+
+File: `components/profile/ResumePreview.tsx`
+Last updated: 2026-08-01
+
+| Property         | Class                                                            |
+| ---------------- | ---------------------------------------------------------------- |
+| Background       | `bg-surface-secondary`                                           |
+| Border           | `border border-border`                                           |
+| Border radius    | `rounded-xl`                                                     |
+| Text — primary   | `text-sm font-medium text-text-primary` (filename)               |
+| Text — muted     | `text-xs text-text-muted` (caption)                              |
+| Spacing          | `px-4 py-3`, `gap-3`                                             |
+| Hover state      | View link `hover:text-accent-dark`                               |
+| Shadow           | none                                                             |
+| Accent usage     | `text-accent` on the file icon and the View link                 |
+
+**Pattern notes:**
+Same row recipe as `ResumeUpload`'s selected-file state — one shape for "a file is attached here".
+
+**View points at `/api/resume`, never at storage.** The route resolves the key from the caller's own
+profile row and signs it server-side, so a link can never name someone else's object. This is the
+component-level half of the rule in `architecture.md` — the client is never given a key.
+
 The real control is the "Select Resume" `Button variant="secondary"`; the dropzone's `onClick` is a
 convenience layered on top and calls `stopPropagation` from the button so one click is not two.
 Validation is client-side only and cosmetic — feature 06 must validate type and size again on the
@@ -487,6 +539,19 @@ Errors reuse the login page's banner recipe verbatim, from a message map, never 
 File: `components/profile/TagInput.tsx`
 Last updated: 2026-08-01
 
+| Property         | Class                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| Background       | chip `bg-surface-secondary`; Add button `bg-surface-secondary`  |
+| Border           | none on the chip — the fill carries it                          |
+| Border radius    | `rounded-md` (chip and button both)                             |
+| Text — primary   | `text-sm font-medium text-text-primary` (chip label)            |
+| Text — muted     | `text-text-muted` (the `×`)                                     |
+| Spacing          | `gap-2` row, chip `px-3 py-1.5`, chip inner `gap-1.5`, list `pt-1` |
+| Hover state      | Add `hover:bg-border-light`; `×` `hover:text-text-primary`      |
+| Shadow           | none                                                            |
+| Accent usage     | focus ring only                                                 |
+
+**Pattern notes:**
 `Field` + `flex gap-2` row (Input, then Add) + a wrapping chip list. Owns only the draft string;
 the committed list is lifted to `ProfileForm`.
 
@@ -504,7 +569,21 @@ rejected case-insensitively.
 File: `components/profile/WorkExperienceCard.tsx`
 Last updated: 2026-08-01
 
+| Property         | Class                                                        |
+| ---------------- | ------------------------------------------------------------ |
+| Background       | `bg-surface-secondary` — inverted against the white card      |
+| Border           | `border border-border`                                        |
+| Border radius    | `rounded-xl`                                                  |
+| Text — primary   | inherited from `Input` / `Textarea`                           |
+| Text — secondary | `text-sm text-text-dark` ("Currently working here")           |
+| Spacing          | `p-5`, `space-y-5` stack, `gap-5` field grid                  |
+| Hover state      | remove control `hover:text-error`                             |
+| Shadow           | none — the fill separates it, not elevation                   |
+| Accent usage     | `accent-accent` on the checkbox; focus ring                   |
+
+**Pattern notes:**
 `space-y-5 rounded-xl border border-border bg-surface-secondary p-5`, fully controlled by props.
+Every control inside is forced back to `bg-surface` — see the inversion rule under Form primitives.
 
 This is the one place radius nests three deep — card `rounded-xl` → role box `rounded-xl` → input
 `rounded-md`. `ui-rules.md` says never stack more than two; the design does, and inverting the fill
@@ -524,12 +603,39 @@ role exists. Add role without remove is a dead end.
 File: `components/profile/ProfileForm.tsx`
 Last updated: 2026-08-01
 
+| Property         | Class                                                       |
+| ---------------- | ----------------------------------------------------------- |
+| Background       | `bg-surface` (card recipe)                                  |
+| Border           | `border border-border`; section rule `border-t border-border` |
+| Border radius    | `rounded-xl`                                                |
+| Text — primary   | `text-base font-semibold` (card title), `text-sm font-semibold` (section) |
+| Text — secondary | `text-sm leading-6 text-text-secondary` (lede)              |
+| Spacing          | `p-6` card, `space-y-8` sections, `pt-8` above each rule, `gap-5` grid |
+| Hover state      | Add role `hover:text-accent-dark`                           |
+| Shadow           | `shadow-sm`                                                 |
+| Accent usage     | `text-accent` on Add role; primary Save button              |
+
+**Pattern notes:**
 One client component owning all form state, on the card recipe. Five sections in a `space-y-8`
 stack; each is a module-local `Section` — `border-t border-border pt-8`, heading
 `text-sm font-semibold text-text-primary`, optional `action` node on the right (that is "+ Add role").
 
 Field grid throughout: `grid gap-5 sm:grid-cols-2`, full-width fields take `sm:col-span-2`.
-Save is `Button type="submit" size="lg" className="mt-8 h-12 w-full"`.
+Save is `Button type="submit" size="lg" className="h-12 w-full"`, disabled and labelled "Saving…"
+while the `useTransition` is pending.
+
+**Status banner** above the Save button, `role="alert"` on failure and `role="status"` on success —
+the success variant is the error recipe recoloured, and it is the project's only success banner:
+
+```
+error:    rounded-md border border-error/30   bg-error/10        px-3 py-2 text-sm text-text-primary
+success:  rounded-md border border-success/30 bg-success-lightest px-3 py-2 text-sm text-text-primary
+```
+
+Body copy stays `text-text-primary` in both, for the same contrast reason as the login banner.
+
+`email` comes in as its own prop, not from the profile row — on a first save there is no row to read
+it from, and the field is disabled because the server always writes the session's address.
 
 Card heading (`Profile Information`) is `text-base font-semibold`; section headings inside it are
 `text-sm font-semibold`. Two levels, matching the type scale — app pages never depart from it.

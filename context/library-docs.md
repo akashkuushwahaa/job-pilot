@@ -151,14 +151,34 @@ const url = data.signedUrl;
 
 - Base resume: `{user_id}/resume.pdf` inside the `resumes` bucket
 
+**The API surface is bigger than the MCP docs show.** `fetch-docs storage-sdk` lists only `from`,
+`upload`, `uploadAuto`, `download` and `remove`. The installed SDK also has `createSignedUrl`,
+`createSignedUrls`, `list` and `getPublicUrl` — verified in
+`node_modules/@insforge/sdk/dist/client-*.d.ts`. Check the types before concluding a method does not
+exist. Likewise the database client is PostgREST under the hood
+(`from()` returns a `PostgrestQueryBuilder`), so `upsert()`, `maybeSingle()` and the rest of
+postgrest-js are available even though InsForge's own docs and type files never mention them.
+
+```typescript
+createSignedUrl(path: string, expiresIn?: number)
+  => { data: { signedUrl: string; expiresAt: string | null }, error }
+// expiresIn defaults to 3600, max 604800
+```
+
 **Rules:**
 
-- Always use `upsert: true` for base resume uploads — overwrites existing file
+- `upload()` replaces an existing key — no `remove()` first for the base resume
 - Save the object **key** to `profiles.resume_path` — never a URL
 - Never call `getPublicUrl()` on `resumes`; it is a private bucket
-- `createSignedUrl` is server-side only and the link is short-lived — generate it per render, never
+- `createSignedUrl` is server-side only and the link is short-lived — generate it per request, never
   store the result in the database
-- Never write files to disk — always upload buffer directly to storage
+- **Never accept an object key from the client.** A private bucket requires *authentication*, not
+  *ownership* — there are no per-path storage policies. Every key is built from `requireUser()`, and
+  a signed URL is only ever minted for a path read out of the caller's own row. See
+  `app/api/resume/route.ts`.
+- **Uploads go through a Route Handler, not a Server Action.** Server Actions default to a 1MB body
+  limit; the resume limit is 5MB (`MAX_RESUME_BYTES`), so a Server Action would reject a valid file.
+- Never write files to disk — always upload the file or buffer directly to storage
 
 ---
 

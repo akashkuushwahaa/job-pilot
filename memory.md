@@ -1,145 +1,142 @@
-# Memory — Feature 04: Database Schema (and Feature 03 hardening)
+# Memory — Feature 05: Profile Page (Full UI) + auth navigation fix
 
-Last updated: 2026-07-31
+Last updated: 2026-08-01
 
-Phase 1 — Foundation is **complete**. Features 01–04 all done. Next is Phase 2.
+Phase 1 complete. **Feature 05 is done.** Next is feature 06 — Profile Save Logic.
 
 ## What was built
 
-### Feature 04 — Database Schema (applied to the live backend)
+### Feature 05 — Profile Page, full UI on mock data
 
-- `migrations/20260731164849_create-jobpilot-schema.sql` — the whole schema in one migration:
-  `profiles`, `agent_runs`, `jobs`, `agent_logs`; 12 indexes; `REVOKE ALL … FROM anon` plus explicit
-  `GRANT`s to `authenticated`; RLS enabled with one `FOR ALL TO authenticated` policy per table.
-- Private `resumes` storage bucket, created with `insforge storage create-bucket resumes --private`.
-- The repo is now **linked** to InsForge project "Akash Kushwaha" (appkey `e6s7asc9`). `.insforge/`
-  is gitignored — `project.json` holds a full-access admin key.
-- Four decisions stored in InsForge project memory (`npx @insforge/cli memory list`).
+Built against `context/designs/profile.png`. No save logic.
 
-### Feature 03 fixes — all 8 `/review` findings resolved
+- `app/profile/page.tsx` — replaced the `ComingSoon` stub. Holds a `mockProfile()` function returning
+  exactly the design's data; email is real, from `requireUser()`.
+- `components/profile/` — `CompletionIndicator` (banner + SVG ring), `ResumeUpload` (owns the whole
+  Resume card), `ProfileForm` (all five sections, owns form state), `TagInput`, `WorkExperienceCard`.
+- `components/ui/` — six hand-written primitives: `field` (exports `Field` **and** `fieldSurface`),
+  `label`, `input`, `textarea`, `select`, `checkbox`.
+- `lib/completeness.ts` — `completeness(profile)` → `{ percent, missing, isComplete }`.
+- `types/index.ts` — `Profile`, `WorkExperienceEntry`, `EducationEntry` and the three enums.
+- `lib/utils.ts` — added `MAX_WORK_EXPERIENCE` (3) and `MAX_RESUME_BYTES` (5MB).
+- `--color-error-dark: #b42318` added to `globals.css` and `ui-tokens.md`.
 
-- `app/error.tsx` (new) — route-level boundary.
-- `components/layout/ErrorState.tsx` (new) — shared card for both error boundaries.
-- `lib/fonts.ts` (new) — one `next/font` instance shared with `global-error.tsx`.
-- `app/global-error.tsx` — rewritten: imports `globals.css`, uses the font variable and tokens.
-- `lib/posthog-server.ts` — bounded retries, `on("error")` listener.
-- `app/api/auth/callback/route.ts` — capture moved inside `after()` from `next/server`.
-- `lib/auth.ts` — added `getSessionUserForAnalytics()`; `getSessionUser` wrapped in React `cache()`.
-- `components/auth/OAuthButton.tsx`, `SignOutButton.tsx` — `transport: "sendBeacon"`.
-- `.gitignore` — `!.env.example`, `.insforge/`; `.env.example` filled with all 5 current vars.
+### Auth navigation fix (found by `/review`)
+
+- `components/layout/AppNavbar.tsx` — new. Rendered by **all three** protected pages.
+- `app/dashboard/page.tsx`, `app/find-jobs/page.tsx` — now render `AppNavbar` above `ComingSoon`.
+- `components/layout/ComingSoon.tsx` — lost its logo and sign-out to the navbar; it is now just the
+  centred card and is **no longer an Auth shell user** (shell is back to three: login, `error.tsx`,
+  `global-error.tsx`).
+- `components/auth/SignOutButton.tsx` — moved into `AppNavbar`; gained `variant` / `fullWidth` props.
+- `Hero` / `CallToAction` / `app/page.tsx` — new `secondaryHref`; `Navbar` nav collapses at `sm`.
 
 ## Decisions made
 
-### Feature 04
-
-- **`resumes` bucket is PRIVATE.** `profiles.resume_pdf_url` is now **`resume_path`** and stores the
-  object key, not a URL. `getPublicUrl()` does not work; use `createSignedUrl(path, 3600)`
-  server-side at render. Never store the signed result in the DB.
-- **No trigger on `auth.users`.** The `profiles` row is created by an app-side upsert on first save,
-  so **every read of `profiles` must handle a missing row**. A trigger runs inside the sign-up
-  transaction — a bug in it would break OAuth for every new user.
-- **`jobs.external_id` is the dedupe key** — Adzuna's stable id, not `redirect_url` (a tracking URL
-  may carry a per-request token, and the constraint would then silently never fire). Unique partial
-  index on `(user_id, source, external_id) WHERE external_id IS NOT NULL`.
-  **Feature 10's upsert must never include `company_research` in its update list** or a re-search
-  wipes a dossier the user already paid a Browserbase session for.
-- **Completeness is derived, never stored.** `is_complete` was dropped; one `completeness(profile)`
-  helper in `lib/` is the single source of truth. No backfill migration when the rules change.
-- **`cover_letter_tone` and all tailored-resume columns dropped** — both out of scope.
-- **`anon` gets nothing.** InsForge grants broad DML to `anon` on `public` tables by default; the
-  migration revokes it, so unauthenticated requests fail at the privilege layer before RLS runs.
-
-### Feature 03
-
-- Server captures always go inside `after()` from `next/server`, never awaited on the request path.
-- Identity lives in the root layout via `getSessionUserForAnalytics()` (catches); `requireUser()` in
-  the page still fails loudly. Blast radius is one route, not the whole app.
-- **Every catch in a Server Component / Server Action / Route Handler calls `unstable_rethrow(error)`
-  first.** Now an invariant in `architecture.md`.
+- **The shadcn CLI was still not run, deliberately.** Feature 05 needs no dialog, and its select and
+  checkbox are native elements. `shadcn init` would rewrite `globals.css` with its own palette. All
+  primitives are hand-written in shadcn's shape on project tokens, as `Button` was. Revisit only when
+  a page genuinely needs a dialog or combobox.
+- **`completeness()` reads exactly ten fields** — design-locked. 70% with PHONE/LOCATION/EDUCATION
+  missing is only self-consistent at ten. Listed in `architecture.md`. Takes `Profile | null`.
+- **Filled inputs tint, empty ones stay white, and the tint inverts against its container.** `Input`
+  reads its own `value`. Inside the grey `WorkExperienceCard`, inputs are forced back to `bg-surface`.
+- **`--color-error` is a signal colour, not a text colour.** Red that is read uses `text-error-dark`.
+- **Every protected page must render `AppNavbar`** — now an invariant in `architecture.md`. There is
+  no shared authenticated layout and no `(app)` route group; pages own their chrome.
+- **Sign-out lives in `AppNavbar`** — the feature-14 plan executed early, because feature 05 deleted
+  `/profile`'s use of `ComingSoon` and took the app's only sign-out on that page with it.
+- **Focus states are split on purpose:** `focus-visible:` on anything clicked, plain `focus:` on
+  `fieldSurface` text controls.
 
 ## Problems solved
 
-- **Analytics was on the auth critical path.** `await captureServerEvent(...)` in the OAuth callback
-  blocked the redirect for a measured **49 seconds** against a hung endpoint (4 attempts at library
-  defaults), and `captureImmediate` *resolves* rather than rejecting so no `try/catch` would have
-  caught it. Fixed with `after()` + `fetchRetryCount: 1` / `fetchRetryDelay: 1000` /
-  `requestTimeout: 3000`. Re-measured: 7s, off the response path.
-- **`captureImmediate` fails silently** — resolves on delivery failure. Only `posthog.on("error", …)`
-  surfaces a dropped server event.
-- **`await posthog.shutdown()` is a no-op in posthog-node 5** — it returns `void`. Use
-  `captureImmediate`.
-- **Catching in the root layout reintroduced the feature-02 `DYNAMIC_SERVER_USAGE` trap**, filling
-  the build log with swallowed stack traces. `unstable_rethrow` first in the catch.
-- **`insforge link` edits tracked files.** It appended an `<!-- INSFORGE:START -->` block to
-  `AGENTS.md` (accurate, kept) and added a blanket `.claude` rule to `.gitignore`. **That rule was
-  removed** — this repo versions its skills under `.claude/skills/`; the 65 tracked files were safe
-  only because gitignore never applies to tracked paths, but any *new* skill would have been
-  invisible.
-- **`.env.example` was gitignored by `.env*`** and would never have reached a clone or CI, while the
-  PostHog setup report told you to configure deployments from it. Fixed with `!.env.example`.
-- **RLS cannot be tested with admin tooling.** Both MCP `run-raw-sql` and CLI `db query` run as
-  `project_admin` and **refuse `SET ROLE`**. Test over the real REST API instead:
-  `GET {url}/api/database/records/{table}` with the anon key.
+- **"Cannot reach /profile after login" was never an auth bug.** `/dashboard` rendered the
+  chrome-less `ComingSoon`, whose only links were the logo and Sign out — nothing pointed at
+  `/profile`. The homepage navbar had the links but was `hidden md:flex`, so under 768px there was no
+  route to `/profile` from anywhere. Fixed by `AppNavbar` on every protected page plus an `sm`
+  breakpoint. Sign-in itself was working the whole time; the dev log had zero auth errors.
+- **Both homepage "Find your first match" buttons pointed at `ctaHref`**, so signed in all four
+  homepage buttons went to `/dashboard` and the secondary label was a lie. Only the *primary* CTA had
+  ever been session-aware.
+- **Verifying auth-gated UI without a session:** write a temporary unauthenticated preview route,
+  `curl` it, grep the markup, delete the route. Used twice. Also worth grepping
+  `.next/static/chunks/*.css` for new utility classes — Tailwind drops unknown ones silently and the
+  build still passes.
+- **PostHog browser events are readable from `.next/dev/logs/next-development.log`.** Mark the line
+  count before a manual browser pass, then `tail -n +N` and grep event names, `provider`,
+  `$anon_distinct_id` and `$current_url` afterwards.
 
 ## Current state
 
 - `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean. Every route dynamic (`ƒ`).
-- **Backend verified live:** RLS on with `USING` + `WITH CHECK` on all four tables; `anon` gets
-  `42501 permission denied` on all four over the real REST API; private bucket returns 403 on list
-  and 401 on direct object fetch; duplicate `external_id` rejected; an upsert refreshed `match_score`
-  50 → 91 while preserving `company_research`; two NULL-`external_id` rows coexist.
-  **All test rows deleted — all four tables are empty.**
-- **PostHog client events confirmed arriving** (read from PostHog's browser debug output in
-  `.next/dev/logs/next-development.log`): two full cycles, both Google —
-  `oauth_sign_in_started {provider:'google'}` → `$identify` (whose `$anon_distinct_id` matches the
-  anonymous id exactly, proving the merge) → `user_signed_out`. Error autocapture also confirmed
-  working on a real `ReferenceError`.
-- A dev server runs on port 3000, started outside these sessions. Must stay on 3000 or the OAuth
-  callback will not match `NEXT_PUBLIC_APP_URL`.
-- Branch `main`. **Nothing has been committed** — features 02, 03 and 04 are all uncommitted.
+  All three protected routes still 307 to `/login` while signed out.
+- **Branch `feat/04-database-schema`** — the name is stale, it now carries all of feature 05 and the
+  auth fix. All code is committed through `689d2bb`. Only `context/progress-tracker.md` and
+  `context/ui-registry.md` are dirty (this session's `/review` and `/imprint` notes).
+- **Browser pass done, 2026-08-01, two full GitHub sign-in cycles.** Confirmed from the dev log:
+  route trail `/login → /dashboard → /profile → /find-jobs → /`; `oauth_sign_in_started` ×2 with
+  `provider: "github"` (first time that provider has ever run); `$identify` ×2 with distinct
+  `$anon_distinct_id`s merging into one identified id; `user_signed_out` ×3; **zero server-side
+  errors**. From autocapture: the checkbox toggled, tag Add clicked ~5×, a chip `×` clicked ~2×.
+- `ui-registry.md` is at 30 entries and was drift-checked across `components/` and `app/`: zero hex
+  values, zero raw Tailwind colour classes, every value a token.
 
 ## Next session starts with
 
-1. **Feature 05 — Profile Page (Full UI).** Build with mock data, no save logic. This is where
-   `completeness(profile)` (returning `{ percent, missing, isComplete }`) and the signed-URL
-   rendering of `resume_path` first land. Remember the profile row may not exist yet.
-2. Feature 05 needs real shadcn primitives (select, checkbox, dialog). Per the feature-01 note: run
-   the shadcn CLI **then**, and map its token names onto ours rather than accepting its palette —
-   it will otherwise overwrite `globals.css`.
-3. The Auth shell primitive now has **four** users (login, `ComingSoon`, `error.tsx`,
-   `global-error.tsx`), past the extraction threshold `ui-registry.md` set. Extract it in the next
-   session that touches any of them.
+1. **Feature 06 — Profile Save Logic.** Delete `mockProfile()` from `app/profile/page.tsx` and read
+   the real row. **Handle a missing row** — there is none until first save; pass `null` straight to
+   `completeness()`. Wire `actions/profile.ts`, upload to `resumes/{user_id}/resume.pdf` with
+   `upsert: true`, store the object **key** in `resume_path`, and render links with
+   `createSignedUrl(path, 3600)` at render time. `job_titles_seeking` and `preferred_locations` are
+   entered as one comma-separated field and must be split into `text[]` on save. Re-validate PDF type
+   and size on the server — `ResumeUpload`'s checks are cosmetic.
+2. **Decide session replay before wiring the save.** See open questions — this is the blocking one.
+3. Consider renaming or merging the `feat/04-database-schema` branch before more work lands on it.
 
 ## Open questions
 
-**Carried forward, still unresolved:**
+**Blocking feature 06:**
 
-- **Rotate the InsForge admin API key** if it was ever committed, pushed or deployed. The `ik_…`
+- **Session replay is recording the profile form and nobody decided that.** 49 `$snapshot` events in
+  the browser pass. It is on because `instrumentation-client.ts` sets `defaults: "2026-01-30"`;
+  nothing in the context files mentions it. Today it captures mock data — from feature 06 it captures
+  real phone numbers, locations, salary expectations and work history as they are typed. Turn it off,
+  configure PostHog input masking, or accept it explicitly and record the decision.
+
+**Auth findings from `/review`, reported and not fixed:**
+
+- **The `unstable_rethrow` invariant is violated in three catches** — `startOAuth` and `clearSession`
+  in `actions/auth.ts`, and the outer catch in `app/api/auth/callback/route.ts`. `redirect()` sits
+  outside the try in both actions so `NEXT_REDIRECT` is not currently swallowed, but `cookies()`
+  inside those blocks can raise Next control-flow exceptions.
+- The OAuth code-verifier cookie is not deleted when the exchange fails — stale for up to 10 minutes.
+- Signed-out visitors see the homepage app-nav links, which 307 straight back to `/login`.
+
+**Still unverified:**
+
+- **Neither error boundary has ever rendered.** Zero `$exception` events. Throw something on purpose.
+- **Server-side `user_signed_in` has never been confirmed arriving** — it goes via `posthog-node` so
+  it never reaches the browser log. Needs PostHog's Activity view; the `phc_` token is write-only.
+- **Google OAuth has not run since the feature-03 fixes** — both browser cycles were GitHub.
+- **`ResumeUpload` drag-and-drop and "Add role" are still unexercised** — no distinguishable trace in
+  autocapture.
+- **Cross-user RLS isolation is still unproven** — `auth.users` holds one user and admin tooling
+  refuses `SET ROLE`. Needs a genuine second signed-in account.
+
+**Carried forward:**
+
+- **Rotate the InsForge admin API key** if it was ever committed, pushed or deployed. The `ik_`
   full-access key had been pasted into `NEXT_PUBLIC_INSFORGE_ANON_KEY` and served to browsers before
-  being replaced with the correct `anon_…` key.
-- **Cross-user RLS isolation is unproven** — that user A cannot read user B's rows, the one property
-  RLS exists for. Needs a real user JWT; admin tooling refuses `SET ROLE` and `auth.users` currently
-  holds one user. Test it the moment a second signed-in session exists.
+  being replaced with the correct `anon_` key.
 
-**New this session:**
+**Small, worth doing when convenient:**
 
-- **Session replay is recording and nobody decided that.** 89 `$snapshot` events,
-  `$recording_status: active`. The `defaults: "2026-01-30"` snapshot in `instrumentation-client.ts`
-  turns it on. Nothing in the context files or the PostHog setup report mentions it. This app is
-  about to store resumes, phone numbers, salary expectations and work history — worth an explicit
-  yes or no.
-- **`user_signed_in` (server-side) has never been confirmed arriving.** It goes via `posthog-node` so
-  it never appears in the browser log. Needs PostHog's Activity view, or a personal API key for a
-  direct query (the `phc_` token is write-only).
-- **GitHub OAuth has never been exercised** — both sign-in cycles were Google.
-- **This session's feature-03 fixes have not run in a browser.** `after()`, the bounded retry and
-  the sendBeacon transport all postdate the sign-ins.
-- **Neither error boundary has rendered.** Only autocapture has fired; `error.tsx` and
-  `global-error.tsx` are untested. Throw something on purpose once.
-
-**Also still open from feature 02:** the homepage CTA label change ("Go to dashboard") is beyond
-build-plan scope and kept deliberately; sign-out uses `md` while login providers use `lg`, judged
-intentional but never confirmed.
-
-**Note on `npm audit`:** 12 high-severity advisories (brace-expansion, postcss, sharp) — all
-pre-existing transitive dependencies of Next/Tailwind/ESLint, none introduced by this work.
+- `Button` size `md` is `h-9` but form controls are `h-10`, so any button on a field row needs an
+  explicit `h-10` override (TagInput's Add does). Consider making `md` `h-10` when feature 09 builds
+  the search controls rather than overriding per site.
+- `ResumePreview.tsx` is listed in `architecture.md` but not built — it lands with feature 06's
+  signed-URL render.
+- `build-plan.md` feature 06 still says `resume_pdf_url`, `is_complete`, and "completion percentage
+  and missing fields calculated and saved". All three are wrong — feature 04 dropped them. The column
+  is `resume_path` and completeness is derived. `architecture.md` is the correct one.

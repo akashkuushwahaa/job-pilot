@@ -7,11 +7,10 @@ Update this file after every completed feature. Any AI agent reading this should
 ## Current Status
 
 **Phase:** Phase 2 — Profile Page, in progress
-**Last completed:** 05 Profile Page — Full UI. Every surface in `context/designs/profile.png` is
-built on mock data: completion banner with ring, resume card, and the five-section form. Six form
-primitives, `AppNavbar`, and `lib/completeness.ts` landed with it. No save logic — the form's
-`onSubmit` calls `preventDefault`.
-**Next:** Phase 2 — 06 Profile Save Logic.
+**Last completed:** 06 Profile Save Logic. `actions/profile.ts` upserts the row with zod validation,
+`app/api/resume/route.ts` owns resume upload and signed access, and `/profile` now reads the real
+row. `mockProfile()` is gone. Not yet exercised in a browser — see Notes.
+**Next:** Phase 2 — 07 AI Profile Extraction from Resume.
 
 ---
 
@@ -27,7 +26,7 @@ primitives, `AppNavbar`, and `lib/completeness.ts` landed with it. No save logic
 ### Phase 2 — Profile Page
 
 - [x] 05 Profile Page — Full UI
-- [ ] 06 Profile Save Logic
+- [x] 06 Profile Save Logic
 - [ ] 07 AI Profile Extraction from Resume
 - [ ] 08 Resume PDF Generation from Profile
 
@@ -375,6 +374,53 @@ Reported symptom: after login you could not reach `/profile`.
   preview until feature 06 uploads one and no state in the design shows it. It lands with the
   signed-URL render in feature 06.
 
+### Feature 06 — Profile Save Logic
+
+Designed through `/architect`. Two latent defects were found during planning and fixed here.
+
+- **`profiles.education` was declared as an array.** `JSONB NOT NULL DEFAULT '[]'::jsonb`, while
+  `architecture.md`, `types/index.ts` and the design all treat it as one object. JSONB accepts
+  either, so nothing errored — but a fresh row got `[]`, and `profile.education ?? EMPTY_EDUCATION`
+  does not catch an empty array, so it would have flowed into the education inputs and dropped them
+  to uncontrolled. Migration `20260801130227_fix-education-shape.sql` makes the column nullable with
+  no default. Applied against zero rows, so no backfill.
+- **InsForge storage has no ownership model.** `storage.buckets` carries only `name`, `public`,
+  `cors_rules`, `versioning_status`, and `pg_policies` shows no RLS on `storage.objects` in any
+  schema. Private means *authenticated*, not *owned* — nothing in the platform stops one signed-in
+  user naming another's key. `app/api/resume/route.ts` is the entire defence: the key is always
+  `${user.id}/resume.pdf` built from `requireUser()`, and `GET` signs a path read from the caller's
+  own row rather than one they supplied. Recorded as a rule in `architecture.md` and `library-docs.md`.
+
+Decisions:
+
+- **Upload is a Route Handler fired on file selection, not part of the Save Profile action.** Server
+  Actions default to a 1MB body limit and the spec allows 5MB, so a Server Action would reject a
+  valid file outright. It also puts the file in storage before feature 07's Extract button needs it.
+- **`profile_completed` fires on a false→true transition.** The action reads the existing row before
+  writing and compares `completeness()` on both sides. No `is_complete` column, fires exactly once.
+- **`email` and `resume_path` are never taken from the client.** `email` comes from the session (the
+  field is disabled, so a payload carrying another address is tampering); `resume_path` is owned by
+  the resume route, so a profile save can never clobber the resume and vice versa.
+- **zod installed and validating the action payload.** Already approved in `code-standards.md`, never
+  installed until now. It bounds sizes and shapes; `lib/profile.ts` separately re-narrows the three
+  enums through the const arrays so an unrecognised value becomes null instead of hitting the CHECK
+  constraint and failing the whole save.
+- **`years_experience` is parsed as a non-negative integer or null.** The column carries
+  `CHECK (>= 0)` and the zod schema only bounds string length, so `"-5"` would have reached Postgres
+  and failed the save with a message the user could not act on.
+- **Both directions of the row↔form mapping live in `lib/profile.ts`.** Split across two files they
+  drift, and a column added to one and missed in the other is silent because every field is optional
+  on the way in.
+- **Session recording now sets `maskAllInputs` explicitly.** posthog-js masks input values by
+  default, so this closes no live leak — it makes the guarantee a property of this repo rather than
+  of a library default that can change under us.
+
+Verified statically: the three app enums match the DB CHECK constraints character for character;
+`education` is nullable with no default; `GET` and `POST /api/resume` and `/profile` all 307 to
+`/login` for an anonymous caller. That last one also proves `unstable_rethrow` is letting
+`NEXT_REDIRECT` through the route's catch — the proxy matcher excludes `/api`, so the redirect can
+only be coming from `requireUser()` inside the handler.
+
 ---
 
 ## Notes
@@ -394,8 +440,20 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
   checked through a temporary unauthenticated preview route (since deleted): 70% ring with the three
   expected missing-field tags, all five sections, and the generated CSS actually contains
   `text-error-dark`, `stroke-error/15`, `bg-error/10` and `accent-accent` rather than dropping them.
-  **Not verified: the page in a browser.** Nothing has been clicked — drag-and-drop, tag add/remove,
-  add/remove role, and the currently-working checkbox have only been reasoned about, not exercised.
+  The browser pass below then exercised the checkbox and both halves of the tag input. **Add role and
+  the drag-and-drop upload are still unexercised.**
+- **Session replay is on, and is now explicitly configured.** It comes from
+  `defaults: "2026-01-30"` in `instrumentation-client.ts`; the browser pass produced 49 `$snapshot`
+  events. Feature 06 settled it: replay stays on for layout and rage-click debugging, with
+  `session_recording: { maskAllInputs: true }` set explicitly. posthog-js already masks input values
+  by default, so this closed no live leak — it turns an undocumented library default into a
+  version-controlled guarantee on a form that now holds real PII. **Not verified in a browser** —
+  confirm masking in an actual recording once one exists.
+- **Feature 06 has not run in a browser at all.** Everything below is unexercised: the first save
+  creating a row, pre-fill on return, the ring moving off mock data, the comma-separated fields
+  becoming `text[]`, `profile_completed` firing exactly once, and the whole resume round-trip
+  (upload → `resume_path` → View → Replace). Server-side upload rejection is also untested — `curl -F`
+  a non-PDF and a >5MB file straight at `/api/resume` to bypass the client checks, which are cosmetic.
 - **Unresolved drift, Phase 5.** `build-plan.md` feature 14 lists a "Cover Letters Generated" stat
   card and a "Resume Tailoring Activity" chart, but `project-overview.md` puts cover letters and
   resume tailoring out of scope and names the four cards as Total Jobs Found / Avg. Match Rate /
@@ -415,17 +473,34 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
   and it needs a real user JWT. Both MCP `run-raw-sql` and CLI `db query` run as `project_admin` and
   refuse `SET ROLE`, so neither can prove it. There is currently only one user in `auth.users`.
   Test it the moment a second signed-in session exists.
-- **Feature 03 is not fully verified either, and for the same reason.** What was verified: the
-  project token and host answer PostHog's flags endpoint with HTTP 200; the posthog-node call shape
-  sends a correct `/batch/` payload; the browser bundle contains a real `posthog.init`; the worst-case
-  server stall is 7s and off the response path; and the `cache()` dedupe is one call per request.
-  What was **not**: no `oauth_sign_in_started`, `user_signed_in`, `user_signed_out` or `$exception`
-  has ever been seen arriving in the PostHog project, because that needs the browser sign-in below.
-  Drive one sign-in and one sign-out, then check PostHog's Activity view before treating the events
-  as working. Neither error boundary has been triggered either — throw something on purpose once.
-- **Feature 02 is not fully verified.** Automated checks that passed: `/dashboard`, `/profile`,
-  `/find-jobs` and `/find-jobs/[id]` all 307 to `/login` while signed out; `/login` renders both
-  providers; the homepage CTAs resolve to `/login`; OAuth init returns a valid provider URL for
-  Google and GitHub. **Not yet exercised: an actual browser sign-in.** The code exchange, cookie
-  write, post-login redirect, the signed-in homepage CTA, and sign-out have never run. Drive one
-  sign-in with each provider before treating this feature as done.
+- **Browser pass, 2026-08-01 — features 02, 03 and 05 exercised end to end.** Read from PostHog's
+  browser debug output in `.next/dev/logs/next-development.log`. Two full sign-in cycles, both
+  **GitHub** — the first time that provider has ever run. Confirmed:
+  - Route trail `/login → /dashboard → /profile → /find-jobs → /`. Both routes that were
+    unreachable before the navigation fix were reached from inside the app.
+  - `oauth_sign_in_started` × 2, each carrying `provider: "github"`.
+  - `$identify` × 2, each with a different `$anon_distinct_id` (`019fbbbd-d472…`, `019fbbbe-500f…`)
+    resolving to the same identified id — the anonymous→identified merge works, so the
+    `oauth_sign_in_started → user_signed_in` funnel is valid.
+  - `user_signed_out` × 3 (three sign-outs against two sign-ins — the browser started signed in).
+  - **Zero server-side errors** across the window: no `[proxy]`, `[api/auth/callback]`,
+    `[actions/auth]` or `[lib/auth]` lines at all.
+  - Feature 05 interactions, from autocapture: the "Currently working here" checkbox toggled
+    (`attr__checked`), the tag **Add** button clicked ~5×, a chip's `×` clicked ~2×, one primary
+    button clicked. **Add role and the drag-and-drop upload path left no distinguishable trace** —
+    treat those two as still unexercised.
+
+  Feature 02 was already covered by automated checks (all four protected routes 307 to `/login`
+  signed out, both providers render, OAuth init returns a valid provider URL); the code exchange,
+  cookie write, post-login redirect and sign-out have now run for real. Feature 03's client events
+  are confirmed leaving the browser.
+
+  **Still not verified after this pass:**
+  - **Neither error boundary has ever rendered.** Zero `$exception` events. `app/error.tsx` and
+    `app/global-error.tsx` remain untested — throw something on purpose once.
+  - **Server-side `user_signed_in` has never been confirmed arriving.** It goes through
+    `posthog-node`, so it never appears in the browser log. Needs PostHog's Activity view or a
+    personal API key; the `phc_` token is write-only.
+  - **Google OAuth has not run since the feature-03 fixes.** Both cycles here were GitHub.
+  - **Cross-user RLS isolation is still unproven** — `auth.users` holds one user, and admin tooling
+    refuses `SET ROLE`. Needs a genuine second signed-in account.

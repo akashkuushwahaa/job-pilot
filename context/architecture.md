@@ -57,6 +57,7 @@
 │       │   ├── find/route.ts              → Trigger Adzuna job discovery
 │       │   └── research/route.ts          → Trigger company research agent
 │       ├── resume/
+│       │   ├── route.ts                   → POST upload the resume PDF; GET a short-lived signed link
 │       │   ├── generate/route.ts          → Generate base resume PDF from profile
 │       │   └── extract/route.ts           → Extract profile data from uploaded resume PDF
 ├── agent/
@@ -118,6 +119,7 @@
 │   ├── posthog-server.ts                  → captureServerEvent — server-side PostHog capture
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
+│   ├── profile.ts                         → Both directions of the profiles row <-> form mapping
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -225,7 +227,7 @@ URL saved to profiles table
 | skills              | text[]      | Array of skill tags                          |
 | industries          | text[]      | Industries worked in                         |
 | work_experience     | jsonb       | Array of up to 3 roles                       |
-| education           | jsonb       | Degree, field, institution, year             |
+| education           | jsonb       | One object: degree, field, institution, year. Nullable, no default |
 | job_titles_seeking  | text[]      | Roles they want                              |
 | remote_preference   | text        | remote / onsite / hybrid / any               |
 | preferred_locations | text[]      | Optional preferred locations                 |
@@ -326,11 +328,26 @@ No tailored-resume columns exist. Resume tailoring is out of scope.
 | resumes | {user_id}/resume.pdf  | Current active resume PDF |
 
 **The bucket is private.** `getPublicUrl()` does not work against it — `profiles.resume_path` stores
-the object key, and a link is produced server-side at render time with
-`createSignedUrl(path, 3600)`. A resume is PII, and on a public bucket its URL is a permanent bearer
-token that leaks through logs, `Referer` headers and PostHog session replay.
+the object key, and a link is produced server-side with `createSignedUrl(path, expiresIn)`. A resume
+is PII, and on a public bucket its URL is a permanent bearer token that leaks through logs,
+`Referer` headers and PostHog session replay.
 
 Verified: an anonymous caller gets 403 listing the bucket and 401 fetching an object directly.
+
+**"Private" means authenticated, not owned.** `storage.buckets` carries only `name`, `public`,
+`cors_rules` and `versioning_status`, and there are no RLS policies on `storage.objects` in any
+schema — InsForge has no per-path storage permissions. Nothing in the platform stops one signed-in
+user from naming another user's key. Two rules follow, and `app/api/resume/route.ts` is the only
+thing enforcing them:
+
+- **The object key is always derived from the session** — `${user.id}/resume.pdf` built from
+  `requireUser()`. A key is never read out of a request body, query string or form field.
+- **The browser never receives a key or a signed URL it asked for.** `GET /api/resume` resolves the
+  key from the caller's *own* profile row, signs it for 60 seconds server-side, and redirects. The
+  signed result is never stored in the database and never rendered into the page.
+
+Cross-user isolation at the bucket itself is unproven — it needs a second account. The design above
+does not depend on the answer.
 
 ---
 
