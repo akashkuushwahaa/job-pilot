@@ -1,61 +1,84 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { CloudUpload, FileText, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CloudUpload, FileText } from "lucide-react";
 
+import { ResumePreview } from "@/components/profile/ResumePreview";
 import { Button } from "@/components/ui/button";
 import { cn, MAX_RESUME_BYTES } from "@/lib/utils";
 
 const ERROR_MESSAGES = {
   type: "That file is not a PDF. Upload your resume as a PDF.",
   size: "That file is larger than 5MB. Upload a smaller PDF.",
+  upload: "Could not upload that resume. Please retry.",
 } as const;
 
-function formatSize(bytes: number): string {
-  const megabytes = bytes / 1024 / 1024;
+type Props = {
+  resumePath: string | null;
+};
 
-  if (megabytes >= 0.1) {
-    return `${megabytes.toFixed(1)} MB`;
-  }
-
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
-export function ResumeUpload() {
+export function ResumeUpload({ resumePath }: Props) {
+  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isReplacing, setIsReplacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  function acceptFile(candidate: File | undefined): void {
-    if (!candidate) {
-      return;
-    }
-
-    if (candidate.type !== "application/pdf") {
-      setFile(null);
-      setError(ERROR_MESSAGES.type);
-      return;
-    }
-
-    if (candidate.size > MAX_RESUME_BYTES) {
-      setFile(null);
-      setError(ERROR_MESSAGES.size);
-      return;
-    }
-
-    setError(null);
-    setFile(candidate);
-  }
-
-  function clearFile(): void {
-    setFile(null);
-    setError(null);
-
+  function resetInput(): void {
     if (inputRef.current) {
       inputRef.current.value = "";
     }
   }
+
+  async function uploadFile(file: File | undefined): Promise<void> {
+    if (!file) {
+      return;
+    }
+
+    // Shapes the UI only. The route re-checks both — these are not the defence.
+    if (file.type !== "application/pdf") {
+      setError(ERROR_MESSAGES.type);
+      resetInput();
+      return;
+    }
+
+    if (file.size > MAX_RESUME_BYTES) {
+      setError(ERROR_MESSAGES.size);
+      resetInput();
+      return;
+    }
+
+    setError(null);
+    setIsUploading(true);
+
+    try {
+      const body = new FormData();
+      body.append("resume", file);
+
+      const response = await fetch("/api/resume", { method: "POST", body });
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setError(result.error ?? ERROR_MESSAGES.upload);
+        return;
+      }
+
+      setIsReplacing(false);
+      // The stored path lives on the server-rendered profile row, so the card
+      // only reflects the new file once the page data is refetched.
+      router.refresh();
+    } catch (uploadError) {
+      console.error("[profile/ResumeUpload]", uploadError);
+      setError(ERROR_MESSAGES.upload);
+    } finally {
+      setIsUploading(false);
+      resetInput();
+    }
+  }
+
+  const showDropzone = resumePath === null || isReplacing;
 
   return (
     <section className="rounded-xl border border-border bg-surface p-6 shadow-sm">
@@ -70,30 +93,10 @@ export function ResumeUpload() {
         type="file"
         accept="application/pdf"
         hidden
-        onChange={(event) => acceptFile(event.target.files?.[0])}
+        onChange={(event) => void uploadFile(event.target.files?.[0])}
       />
 
-      {file ? (
-        <div className="mt-4 flex items-center gap-3 rounded-xl border border-border bg-surface-secondary px-4 py-3">
-          <FileText aria-hidden className="size-5 shrink-0 text-accent" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-text-primary">
-              {file.name}
-            </p>
-            <p className="text-xs text-text-muted">
-              {formatSize(file.size)} — not uploaded yet
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={clearFile}
-            className="grid size-8 shrink-0 place-items-center rounded-md text-text-secondary transition-colors hover:bg-border-light hover:text-text-primary focus-visible:ring-1 focus-visible:ring-accent focus-visible:outline-none"
-          >
-            <X aria-hidden className="size-4" />
-            <span className="sr-only">Remove {file.name}</span>
-          </button>
-        </div>
-      ) : (
+      {showDropzone ? (
         <div
           onClick={() => inputRef.current?.click()}
           onDragOver={(event) => {
@@ -104,18 +107,19 @@ export function ResumeUpload() {
           onDrop={(event) => {
             event.preventDefault();
             setIsDragging(false);
-            acceptFile(event.dataTransfer.files?.[0]);
+            void uploadFile(event.dataTransfer.files?.[0]);
           }}
           className={cn(
             "mt-4 flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed border-border bg-surface-secondary px-6 py-10 text-center transition-colors",
             isDragging && "border-accent bg-accent-muted",
+            isUploading && "pointer-events-none opacity-60",
           )}
         >
           <span className="grid size-12 place-items-center rounded-full border border-border bg-surface text-accent shadow-sm">
             <CloudUpload aria-hidden className="size-5" />
           </span>
           <p className="mt-4 text-sm font-semibold text-text-primary">
-            Click to upload or drag and drop
+            {isUploading ? "Uploading…" : "Click to upload or drag and drop"}
           </p>
           <p className="mt-1 text-xs text-text-muted">
             PDF only. Maximum file size 5MB.
@@ -123,6 +127,7 @@ export function ResumeUpload() {
           <Button
             type="button"
             variant="secondary"
+            disabled={isUploading}
             className="mt-5 shadow-sm"
             onClick={(event) => {
               event.stopPropagation();
@@ -132,6 +137,14 @@ export function ResumeUpload() {
             Select Resume
           </Button>
         </div>
+      ) : (
+        <ResumePreview
+          path={resumePath}
+          onReplace={() => {
+            setError(null);
+            setIsReplacing(true);
+          }}
+        />
       )}
 
       {error ? (
