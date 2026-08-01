@@ -64,6 +64,11 @@ export type Profile = {
   updated_at: string;
 };
 
+// Everything on a profile except the columns the database maintains. A save
+// composes one of these before the row exists, so nothing that reads profile
+// content should require `updated_at`.
+export type ProfileFields = Omit<Profile, "updated_at">;
+
 // Every control is a string here even where the column is not. The form owns the
 // display shape; lib/profile.ts owns both directions of the mapping. The two
 // text[] columns entered as one comma-separated field stay strings until save.
@@ -88,18 +93,3 @@ export type ProfileFormValues = {
   preferred_locations: string;
 };
 
-export const EMPTY_ROLE: WorkExperienceEntry = {
-  company: "",
-  title: "",
-  start_date: "",
-  end_date: "",
-  currently_working: false,
-  responsibilities: "",
-};
-
-export const EMPTY_EDUCATION: EducationEntry = {
-  degree: "",
-  field: "",
-  institution: "",
-  graduation_year: "",
-};

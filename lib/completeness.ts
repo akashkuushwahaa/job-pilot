@@ -1,4 +1,4 @@
-import type { Profile } from "@/types";
+import type { ProfileFields } from "@/types";
 
 export type Completeness = {
   percent: number;
@@ -15,7 +15,7 @@ export type Completeness = {
 // the resume — improves results without being required for them.
 const REQUIRED_FIELDS: ReadonlyArray<{
   label: string;
-  isFilled: (profile: Profile) => boolean;
+  isFilled: (profile: ProfileFields) => boolean;
 }> = [
   { label: "Full name", isFilled: (p) => hasText(p.full_name) },
   { label: "Email", isFilled: (p) => hasText(p.email) },
@@ -45,11 +45,15 @@ const REQUIRED_FIELDS: ReadonlyArray<{
   },
 ];
 
-function hasText(value: string | null): boolean {
-  return value !== null && value.trim().length > 0;
+// Accepts undefined as well as null on purpose. jsonb columns are structurally
+// unchecked by Postgres, so an education object missing a key hands this an
+// undefined — and `undefined !== null` would sail past a null-only guard and
+// throw on .trim(), taking the whole profile page down with it.
+function hasText(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
-export function completeness(profile: Profile | null): Completeness {
+export function completeness(profile: ProfileFields | null): Completeness {
   if (profile === null) {
     return {
       percent: 0,
