@@ -19,6 +19,22 @@ export const WORK_AUTHORIZATIONS = [
 
 export type WorkAuthorization = (typeof WORK_AUTHORIZATIONS)[number];
 
+// Not a database enum — profiles.education is jsonb and degree is a free string
+// inside it. This list exists because the Education select offers exactly these
+// and resume extraction has to pick from the same set: a degree the select
+// cannot render would silently show as blank.
+export const DEGREE_OPTIONS = [
+  "High School",
+  "Associate",
+  "Bachelor's",
+  "Master's",
+  "PhD",
+  "Bootcamp",
+  "Self-taught",
+] as const;
+
+export type Degree = (typeof DEGREE_OPTIONS)[number];
+
 // profiles.work_experience — jsonb array, capped at MAX_WORK_EXPERIENCE roles.
 export type WorkExperienceEntry = {
   company: string;
@@ -91,5 +107,27 @@ export type ProfileFormValues = {
   remote_preference: string;
   salary_expectation: string;
   preferred_locations: string;
+};
+
+// What resume extraction is allowed to hand back. The omissions are the point:
+// email comes from the session, and work authorization and the four job
+// preferences are things a resume does not state — filling them would mean
+// inventing them. Every key is optional because a field the resume is silent
+// about must leave whatever the user already typed alone.
+export type ExtractedFormValues = Partial<
+  Omit<
+    ProfileFormValues,
+    | "email"
+    | "work_authorization"
+    | "job_titles_seeking"
+    | "remote_preference"
+    | "salary_expectation"
+    | "preferred_locations"
+    | "education"
+  >
+> & {
+  // Merged key by key rather than wholesale: a resume that names the institution
+  // but not the field of study must not blank out a field of study already there.
+  education?: Partial<EducationEntry>;
 };
 
