@@ -291,6 +291,24 @@ Build the complete job details page UI. Job data from DB is already available fr
 - Company Research card — empty state with Research Company button. After research: structured dossier with company overview, tech stack, culture, why this role, interview prep
 - Apply Now button (links to redirect_url, opens in new tab)
 
+> Corrected against `context/designs/job-details.png`, `ui-tokens.md` and the live rows in feature 12.
+> **Missing skills are purple, not "red/orange".** `ui-tokens.md`'s Skills Badges table pairs them
+> with `bg-accent-muted` / `text-accent` and the design draws purple — and semantically a gap skill is
+> what feature 13 turns into a strategy, not an error.
+> **The match badge is keyed on `MATCH_THRESHOLD`, not on the score bar's bands.** `matchBadge()` and
+> `matchScoreFill()` both live in `lib/utils.ts` and must stay separate: the design draws an 85%
+> badge green while an 85 bar is blue.
+> **Every section renders only if it has content, and the whole Job Description card can disappear.**
+> Feature 10 leaves `responsibilities`, `requirements`, `nice_to_have`, `benefits` and
+> `about_company` empty, so the page is thinner than the design draws it. It renders less rather than
+> rendering empty headings.
+> **`company_research` is not read at all.** Feature 12 draws the empty state; feature 13 adds the
+> column to the select, the dossier markup and the button's handler together, so there is never a
+> card that reports "No research yet" over a dossier that exists. The Research Company button is
+> inert until then — the same full-UI-then-wire split features 09 and 10 made on Find Jobs.
+> **Feature 12 also added the table row `href`** that feature 09 deliberately left out.
+> `architecture.md` is authoritative.
+
 ---
 
 # Feature 13 — Company Research Agent (Updated)

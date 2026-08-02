@@ -6,18 +6,18 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 3 — Find Jobs Page, complete
-**Last completed:** 11 Filter + Sort + Pagination. The filter bar, both sorts, the text filter and
-every pagination control are wired to the `jobs` read. All four live in the URL
-(`?q=&match=&sort=&page=`), so the read stays in the Server Component and a refresh, the back button
-and a shared link all reproduce the same list. **Not yet run in a browser** — see Feature 11 below
-for what was verified and what was not.
+**Phase:** Phase 4 — Job Details Page, in progress
+**Last completed:** 12 Job Details Page — Full UI. `/find-jobs/[id]` renders the whole job from the
+`jobs` row: header, four fact cards, GPT-4o's reasoning, both skill lists, the description and the
+Apply action. Company Research is the empty state only — feature 13 owns the agent and the button's
+handler. The table rows link now, closing the one placeholder feature 09 left. **Not yet run in a
+browser** — see Feature 12 below.
 **Open defect, carried:** searching a country the app does not support returns confidently wrong
 results rather than nothing — "India" was scored as Indianapolis. Details in Notes. It was flagged
-"fix before feature 11" and was not fixed; feature 11 does not depend on it, but it is now the
-oldest open item and a second run has since added ten more US rows.
-**Next:** 12 Job Details Page — Full UI. It also adds the `href` the table rows have been waiting
-for since feature 09.
+"fix before feature 11", was not fixed then either, and is now the oldest open item — a second run
+has since added ten more US rows.
+**Next:** 13 Company Research Agent. It wires the Research Company button, writes
+`jobs.company_research`, and replaces the empty state with the nine-field dossier.
 
 ---
 
@@ -45,7 +45,7 @@ for since feature 09.
 
 ### Phase 4 — Job Details Page
 
-- [ ] 12 Job Details Page — Full UI
+- [x] 12 Job Details Page — Full UI
 - [ ] 13 Company Research Agent
 
 ### Phase 5 — Dashboard
@@ -827,11 +827,116 @@ between pages. **Pagination cannot be exercised by the current data at all** —
 is exactly one page, so the buttons are all in their disabled/single-page state until a 21st row
 exists.
 
+### Feature 12 — Job Details Page (Full UI)
+
+Five components under `components/job-details/`, matching `architecture.md`'s listing name for name,
+plus `app/find-jobs/[id]/page.tsx` and `fetchJob` in `lib/jobs.ts`. Built against
+`context/designs/job-details.png`.
+
+Decisions:
+
+- **Real data on arrival, not mock data.** `build-plan.md` scopes feature 12 as "Full UI" but says to
+  wire the job info and match sections immediately, because Phase 3 already put the rows in the
+  database. Only Company Research is a placeholder, and only because feature 13 is what fills it.
+- **`company_research` is not selected by the read.** The card renders the empty state and nothing
+  else, so selecting the column would leave a card that says "No research yet" over a dossier that
+  exists. Feature 13 adds the column, the dossier markup and the button's handler together.
+- **The Research Company button is inert.** Same split feature 09 made across the whole Find Jobs
+  page: the full-UI feature draws the control, the next feature wires it. Documented here rather than
+  disabled, because the design draws it active and the empty-state copy tells the user to click it.
+- **The match badge is not the match bar.** `matchBadge()` was added to `lib/utils.ts` beside
+  `matchScoreFill()`. The badge keys on `MATCH_THRESHOLD` (70) and the bar on the design's 90/80
+  bands, which is why the design draws an 85% badge green while the same 85 paints a blue bar. Two
+  different questions — "did it clear the bar" and "where in the range does it sit" — and collapsing
+  them would make one of the two wrong. Verified: 69 → grey, 70 → green.
+- **An absent fact renders as `—` plus an `sr-only` "Not stated".** The design draws the em dash and
+  every live row has a null `job_type`, so this branch is the common case, not the edge one. An em
+  dash alone is announced as "em dash".
+- **Every section of the page is conditional.** No reasoning → no reasoning card; no skills → no
+  skills card; nothing in any description column → no description card at all. Feature 10 warned this
+  page would look thinner than the design, and the honest way to be thinner is to render less rather
+  than to render empty headings.
+- **Missing skills are purple, not red.** `build-plan.md` feature 12 says "red/orange badges";
+  `ui-tokens.md`'s Skills Badges table says `bg-accent-muted` / `text-accent` and the design draws
+  purple. Two sources against one, and the semantic argument agrees: a gap skill is what feature 13
+  turns into a strategy, not an error.
+- **`max-w-4xl`, following `/profile`.** A details page is a reading column. `/find-jobs` keeps the
+  full 1440px because a table is scanned across.
+- **The row link is one link, not five.** A `<tr>` cannot wrap an `<a>`, so the company name is the
+  link and a pseudo-element stretches it over the row. Killing the outline meant replacing it: the
+  focus ring moved onto the pseudo-element, because `focus-within:bg-surface-secondary` is a 1.04:1
+  change and is not a focus indicator.
+- **A malformed id is a 404, not an error page.** PostgREST answers a non-uuid with `22P02`, which
+  arrives as a read failure and would render the error boundary for a hand-typed URL. `fetchJob`
+  shape-checks the id before querying. A *missing* row returns null → `notFound()`; a read failure or
+  an unreadable row throws, because "this job does not exist" is a different statement from "the
+  database is broken" and sending someone back to a list still showing the row they clicked is worse
+  than an error.
+- **No new PostHog event.** Still seven.
+
+Found while building:
+
+- **The design cannot be reproduced by the current data, and that is the data's fault, not the
+  page's.** The design draws an 85% green badge, "Newark, Ess…", a salary range and "1 hour ago". The
+  live table's top score is **65**, so *every* job renders the grey Low Match badge; `job_type` is
+  null on all 20 rows, so the Job Type card always shows `—`; and `salary_min == salary_max` on these
+  rows so every salary is a single figure. Everything the design shows is reachable — none of it is
+  reachable *today*.
+- **`sr-only` and the pseudo-element classes had to be confirmed in the emitted CSS**, not assumed.
+  A first grep said `before:content-['']` and `focus-visible:before:ring-accent` were missing; the
+  grep pattern was wrong, not the CSS — Tailwind escapes the colons, so the selector is
+  `.before\:content-\[\'\'\]`. All ten new selectors are present. Worth remembering before concluding
+  Tailwind dropped a class.
+
+**Verified by execution:** two temporary routes (since deleted, both confirmed 404).
+
+- **The parse path, against a row copied verbatim out of the live table** with `row_to_json` —
+  including the company named "SimVentions, Inc - Glassdoor ✪ 4.6". Seven shapes: the real row parses;
+  `responsibilities: null` and `matched_skills: null` degrade to `[]`; `about_company: undefined` and
+  `salary: undefined` degrade to `null`; extra keys (`run_id`, `company_research`) are stripped; and
+  `title: null`, `match_score: "60"` and a bare string are each **rejected**, which is the point — a
+  job with no title or no score has nothing worth rendering.
+- **The id guard, with a discriminating negative control.** `nope`, `1' OR '1'='1`, `" "` and a
+  truncated uuid all returned `null (404)` **without touching the database**. Two well-formed uuids
+  did reach PostgREST and came back `42501 permission denied` — the anonymous caller's expected
+  refusal, which proves the query parsed. An earlier run of the same probe passed a non-uuid
+  `user_id` and produced `22P02 invalid input syntax for type uuid`, which is exactly the failure the
+  guard exists to prevent on the id.
+- **`matchBadge`:** 69 → `bg-surface-secondary text-text-secondary`, 70 and 85 →
+  `bg-success-lightest text-success-foreground`. **`formatJobType`:** `fulltime` → "Full-time",
+  `parttime` → "Part-time", `contract` → "Contract", an unknown value title-cases rather than
+  disappearing, and `""` / `null` both return null so the caller draws the em dash.
+- **The rendered markup, over three job shapes.** A real row (65, null job type, empty description
+  arrays) drew the grey badge, one `—` with its `sr-only` "Not stated", three skill chips and a
+  description card carrying only `about_role` — no bullet headings. A rich row (85, `fulltime`, all
+  four arrays filled) drew the green badge, "Full-time" and all four sections. A bare row (no reason,
+  no skills, no description, no URLs) drew **no** reasoning card, **no** skills card, **no**
+  description card and **no** View Job Post link, and Apply Now rendered as a disabled `<button>` with
+  its muted reason instead of an `<a>`.
+- **The table rows:** `<tr class="relative …">`, exactly **one** `<a>` per row, `href` correct, and an
+  accessible name of "Company — Title".
+- **The emitted CSS** contains all ten new selectors, including `.sr-only`,
+  `.before\:content-\[\'\'\]`, the three `focus-visible\:before\:ring-*` rules, `bg-info-lightest`
+  and `text-info-foreground`.
+- `npx tsc --noEmit`, `npm run lint` and `npm run build` all clean, every route `ƒ`,
+  `/find-jobs/[id]` registered, and both it and `/find-jobs/nope` 307 to `/login` while signed out.
+
+**Not verified — nothing here has rendered for a signed-in user.** Unexercised: clicking a real row
+through to the page, the back link, View Job Post and Apply Now actually opening Adzuna, the 404 for
+a valid-but-absent uuid (anonymous callers cannot get past the privilege layer to reach it), the
+responsive stacking of the header row and the fact grid, and the keyboard focus ring on a table row.
+
 ---
 
 ## Notes
 
 _Add notes here as the build progresses — workarounds, patterns, anything that differs from the context files._
+
+- **The job details page cannot look like its design until the data improves.** Top `match_score` is
+  65, so the header badge is grey on every job; `job_type` is null on all 20 rows, so the Job Type
+  card always reads `—`; and the four description arrays are empty by design (feature 10), so the
+  Job Description card is a single paragraph. All three are honest renderings of real rows — do not
+  "fix" the page to match the picture.
 
 - **OPEN DEFECT — an unsupported country returns confidently wrong results.** The first real search
   was "Backend Developer" in **India** and it saved ten jobs in **Indianapolis**. `detectCountry`
@@ -859,8 +964,8 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
   PostHog's Activity view.
 - **Historical, features 09–10 only — every control on the page is wired now.** Feature 09 shipped
   the filter input, both selects and the pagination buttons inert; feature 10 wired Find Jobs and
-  deleted `mockJobs()`; feature 11 wired the remaining five. Nothing on `/find-jobs` is a placeholder
-  any more except the table row `href`, which lands with feature 12.
+  deleted `mockJobs()`; feature 11 wired the remaining five; feature 12 added the row `href`.
+  **Nothing on `/find-jobs` is a placeholder any more.**
 - **Feature 11 has not run in a browser.** Every control, the 300ms debounce, the page clamp, both
   empty-state sentences and `Link` navigation are unexercised. **Pagination cannot be exercised by
   the current data** — 20 rows at 20 per page is exactly one page, so a 21st row is needed before

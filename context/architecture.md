@@ -126,7 +126,7 @@
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
 │   ├── profile.ts                         → parseProfile + both directions of the row <-> form mapping
-│   ├── jobs.ts                            → parseJobList, the discovery banner sentence, and the filtered/sorted/paged jobs read
+│   ├── jobs.ts                            → parseJobList, the discovery banner sentence, the filtered/sorted/paged list read, and the single-job read
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -381,6 +381,12 @@ time, so every row written by one discovery run carries the same millisecond —
 are common at ten results a run. A sort on either column alone is not a total order, and Postgres is
 free to break the ties differently per request, which on a paged read shows one row on two pages and
 another on none. `fetchJobPage` in `lib/jobs.ts` appends `id` to every sort; it is not decoration.
+
+**A single-job read shape-checks the id before it queries.** `jobs.id` is a uuid, and PostgREST
+answers a malformed one with `22P02 invalid input syntax for type uuid` — a *read failure*, which
+`/find-jobs/[id]` would render on the error boundary. A hand-typed URL is a missing job, not a broken
+database, so `fetchJob` returns null for anything that is not uuid-shaped and the page turns that
+into `notFound()`. A genuine read failure or an unreadable row still throws.
 
 No tailored-resume columns exist. Resume tailoring is out of scope.
 

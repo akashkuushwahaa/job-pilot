@@ -859,8 +859,18 @@ column — see the correction note in `build-plan.md`.
 - **Match score bar:** track `h-1 w-24 shrink-0 overflow-hidden rounded-full bg-border-light lg:w-32`, fill `block h-full rounded-full` + `matchScoreFill(score)` from `lib/utils.ts`. The track is `aria-hidden` because the percentage sits right beside it — one reading, not two.
 - **The fill width is the project's only inline style.** A percentage is a value, not a token, so it
   cannot be a class. `code-standards.md`'s no-inline-styles rule is about styling; this is data.
-- **Rows are not links.** `/find-jobs/[id]` lands in feature 12 and a row that navigates to a 404 is
-  worse than one that does not navigate. The hover state is kept, so only the `href` is missing.
+- **Feature 12 — the row is a link now, and it is one link, not five.** A `<tr>` cannot wrap an
+  `<a>` around its cells, so the company name is the real link and a pseudo-element stretches it over
+  the row: `<tr class="relative">` is the containing block, and the link carries
+  `before:absolute before:inset-0 before:content-['']`. Reuse this whenever a whole block should be
+  clickable but the markup cannot nest an anchor.
+  - **The link's accessible name is "Company — Title".** The visible text is the company alone, which
+    is not a link name a screen-reader user can act on when six rows share an employer, so the title
+    follows in an `sr-only` span.
+  - **Killing the outline means replacing it.** `focus-visible:outline-none` on a stretched link
+    would leave keyboard focus invisible — `focus-within:bg-surface-secondary` is a 1.04:1 change and
+    is not an indicator. The ring moves onto the pseudo-element instead:
+    `focus-visible:before:ring-1 focus-visible:before:ring-accent focus-visible:before:ring-inset`.
 
 **Empty state** — `ui-rules.md`'s recipe, icon above muted text, no CTA (the CTA is the search card
 already on the page):
@@ -932,6 +942,149 @@ the URL, `fetchJobPage` reads against it, and the resolved page number is folded
 `listQuery` object that `JobFilters` and `JobsPagination` both take. Passing the *resolved* page —
 not the requested one — is what keeps a clamped `?page=99` from showing controls that disagree with
 the rows underneath them.
+
+### JobInfo — `components/job-details/JobInfo.tsx`
+
+File: `components/job-details/JobInfo.tsx`
+Last updated: 2026-08-02 (feature 12)
+
+| Property         | Class                                                              |
+| ---------------- | ------------------------------------------------------------------ |
+| Background       | `bg-surface` (card recipe, both cards)                             |
+| Border           | `border border-border`                                             |
+| Border radius    | `rounded-xl` (cards), `rounded-lg` (fact chips)                    |
+| Text — primary   | `text-2xl font-bold text-text-primary sm:text-3xl` (job title)     |
+| Text — secondary | `text-sm text-text-secondary` (company)                            |
+| Text — muted     | `text-xs font-medium tracking-wider text-text-muted uppercase` (fact label) |
+| Spacing          | `p-6` header card, `p-4` fact cards, `gap-4` grid and rows         |
+| Shadow           | `shadow-sm` on both                                                 |
+| Accent usage     | job-type chip `bg-accent-muted text-accent`                        |
+
+**Pattern notes:**
+Renders **two** cards from one component — the identity card and the four-fact grid — as a fragment,
+so the page's `space-y-6` still puts 24px between them. Same shape as `ProfileWorkspace`: a component
+that owns a slice of the page rather than exactly one box.
+
+- **Company chip, large variant:** `grid size-14 shrink-0 place-items-center rounded-xl border border-border bg-surface-secondary text-text-secondary` with `Building2` at `size-6`. The `JobsTable` `size-9` chip is the same recipe one step down; use this one wherever the company is the subject of the page.
+- **Fact grid:** `grid gap-4 sm:grid-cols-2 lg:grid-cols-4`, each card `flex items-center gap-3 rounded-xl border border-border bg-surface p-4 shadow-sm`. Value above label — `text-sm font-semibold text-text-primary` over the display-field-label recipe.
+- **Fact icon chips are tinted per fact, never per score:** salary `bg-success-lightest text-success-foreground`, location `bg-info-lightest text-info-foreground`, job type `bg-accent-muted text-accent`, date found `bg-surface-secondary text-text-secondary`. All `size-9 rounded-lg` with a `size-4` lucide icon.
+- **The match badge is a status badge, not a score bar.** `matchBadge()` in `lib/utils.ts` keys on `MATCH_THRESHOLD` (`bg-success-lightest text-success-foreground` at or above, `bg-surface-secondary text-text-secondary` below), which is why the design draws 85% green while `matchScoreFill()` paints an 85 bar blue. **Do not collapse the two functions** — the bar reports where in the range a score sits, the badge reports whether it cleared the bar.
+- **An absent fact is an em dash with an `sr-only` replacement.** The design draws `—`, which reads aloud as "em dash"; `<span aria-hidden>—</span><span className="sr-only">Not stated</span>` keeps the drawing and the announcement both correct. Reuse for any "—" that stands in for missing data.
+- The value line is `truncate` inside a `min-w-0` column, which is what lets a long location render as the design's "Newark, Ess…" rather than blowing the grid out.
+
+### MatchScore — `components/job-details/MatchScore.tsx`
+
+File: `components/job-details/MatchScore.tsx`
+Last updated: 2026-08-02 (feature 12)
+
+Two cards, again as a fragment: the reasoning paragraph and the two skill lists.
+
+| Element        | Class                                                                 |
+| -------------- | --------------------------------------------------------------------- |
+| Card eyebrow   | `text-xs font-medium tracking-wider text-text-secondary uppercase`     |
+| Icon chip      | `grid size-9 place-items-center rounded-lg bg-success-lightest text-success` |
+| Paragraph      | `mt-5 text-sm leading-7 text-text-primary`                            |
+| List label     | `mt-5 text-sm text-text-secondary` ("You have" / "Gap skills")        |
+| Skill chip     | `inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium` |
+
+**Pattern notes:**
+
+- **Skill chip colours come straight from `ui-tokens.md`'s Skills Badges table** — matched
+  `bg-success-lightest text-success-foreground` with a `Check`, missing `bg-accent-muted text-accent`
+  with an `X`, both icons `size-3.5`. `build-plan.md` feature 12 says "missing skills as red/orange
+  badges"; the tokens and the design both say purple, and two sources beat one. **Missing skills are
+  not an error state** — they are the gap the company-research dossier turns into a strategy.
+- **A card with nothing to say does not render.** No `match_reason` → no reasoning card; both skill
+  arrays empty → no skills card. An empty-but-present card is a heading over blank space, which reads
+  as a broken page rather than as a job the model had little to say about.
+- **Eyebrow, not heading.** These two cards carry an uppercase label; `JobDescription` and
+  `CompanyResearch` carry a `text-base font-semibold` title. The split is deliberate — a label sits
+  over content, a title names a section the user might link to.
+
+### JobDescription — `components/job-details/JobDescription.tsx`
+
+File: `components/job-details/JobDescription.tsx`
+Last updated: 2026-08-02 (feature 12)
+
+| Element        | Class                                                                    |
+| -------------- | ------------------------------------------------------------------------ |
+| Card           | the standard card recipe                                                 |
+| Icon chip      | `grid size-9 place-items-center rounded-lg bg-surface-secondary text-text-secondary` |
+| Card title     | `text-base font-semibold text-text-primary`                              |
+| Body           | `mt-5 text-sm leading-7 text-text-primary`                               |
+| Sub-heading    | `text-sm font-semibold text-text-primary`                                |
+| Bullet         | `flex items-start gap-3 text-sm leading-6 text-text-primary` + `mt-2 size-1.5 shrink-0 rounded-full bg-text-muted` marker |
+
+**Pattern notes:**
+**Every section is conditional and the whole card can return `null`.** Adzuna returns a 500-character
+snippet, so feature 10 stores it in `about_role` verbatim and leaves `responsibilities`,
+`requirements`, `nice_to_have`, `benefits` and `about_company` empty on every row discovered so far —
+confirmed against all 20 live rows. Four empty headings would advertise data the product does not
+have. The section list is built then `.filter`ed on length, so adding a source that does fill them
+needs no other change.
+
+The bullet marker is a `size-1.5` dot rather than a list-style disc, matching `Features.tsx`'s
+`PointList` shape at a smaller step.
+
+### CompanyResearch — `components/job-details/CompanyResearch.tsx`
+
+File: `components/job-details/CompanyResearch.tsx`
+Last updated: 2026-08-02 (feature 12)
+
+| Property         | Class                                                                |
+| ---------------- | -------------------------------------------------------------------- |
+| Card             | `overflow-hidden rounded-xl border border-border bg-surface shadow-sm` — the **list variant** |
+| Header row       | `flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between` |
+| Divider          | `border-t border-border` on the body, edge to edge                   |
+| Icon chip        | `grid size-9 place-items-center rounded-lg bg-accent-muted text-accent` |
+| Empty state      | `flex flex-col items-center border-t border-border px-6 py-16 text-center` |
+
+**Pattern notes:**
+
+- **The list-variant card earns its second use here.** The design draws a rule spanning the card edge
+  to edge under the header; padding therefore lives on the header row and on the body, not on the
+  card. Same recipe as the jobs list card — reach for it whenever a card has a header rule.
+- **The Research Company button is a pill:** `Button` overridden with `rounded-full`. It is the only
+  pill button in the app; the design draws it that way and the Apply button on the same page as a
+  normal `rounded-md`, so the two are meant to read as different kinds of action.
+- **Empty state reuses `JobsTable`'s recipe** — `size-12` bordered circle, then a
+  `text-sm font-medium text-text-primary` line and muted copy — but adds the bold line above the
+  muted sentence, because this empty state has a CTA to point at and the table's does not.
+- **The button is inert until feature 13.** Feature 12 is the full-UI feature and 13 is the agent,
+  the same split feature 09 and feature 10 made on Find Jobs. `company_research` is deliberately not
+  even selected by the read: a card that renders "No research yet" over a dossier that exists would
+  be worse than one that cannot render a dossier at all.
+
+### JobActions — `components/job-details/JobActions.tsx`
+
+File: `components/job-details/JobActions.tsx`
+Last updated: 2026-08-02 (feature 12)
+
+The page's primary action: `buttonVariants({ size: "lg", className: "h-12 w-full rounded-lg" })` on
+an `<a target="_blank" rel="noopener noreferrer">`. Same `h-12 w-full` step as `ProfileForm`'s Save.
+
+**Pattern notes:**
+`buttonVariants` on an `<a>` because it navigates, `Button` when it does not — the rule `PageControl`
+made mechanical in `JobsPagination`. With no apply URL it renders the disabled `Button` plus the
+muted reason (`mt-3 text-xs text-text-muted`), the project's standing disabled-with-a-reason
+treatment. Every Adzuna row carries a redirect URL, so that branch should never be seen — it exists
+because a button that opens nothing is worse than one that says why it cannot.
+
+### Job details page — `app/find-jobs/[id]/page.tsx`
+
+`AppNavbar active="find-jobs"` + `main.flex-1.bg-background` + `mx-auto w-full max-w-4xl px-6 py-8`,
+then a back link and a `mt-6 space-y-6` stack of the five components above.
+
+**`max-w-4xl`, not the 1440px page container** — the same call `/profile` made. This is a reading
+column; `/find-jobs` uses the full width because a table is scanned across.
+
+Back link: `inline-flex items-center gap-1.5 rounded-md text-sm font-medium text-text-secondary
+transition-colors hover:text-text-primary` + the standard `focus-visible` ring, with a `size-4`
+`ChevronLeft`. It points at bare `/find-jobs` and drops the list's filter — the browser's back button
+is what preserves it.
+
+**Zero Client Components.** Everything on the page is either static or a `Link`; the one interactive
+control, Research Company, is inert until feature 13 hands it a handler.
 
 ### Profile page — `app/profile/page.tsx`
 
