@@ -532,6 +532,7 @@ const response = await openai.chat.completions.create({
   model: "gpt-4o",
   response_format: { type: "json_object" },
   temperature: 0.3,
+  max_completion_tokens: 800,
   messages: [
     {
       role: "system",
@@ -561,10 +562,24 @@ const result = JSON.parse(response.choices[0].message.content!);
 
 **Rules:**
 
-- Model string is always `'gpt-4o'` — never use other model names
+- Model string is always `'gpt-4o'` — imported as `OPENAI_MODEL` from `lib/openai.ts`,
+  never written inline
+- Use `max_completion_tokens`, not `max_tokens`. The installed SDK (v7) still types
+  `max_tokens` but marks it deprecated
 - Always use `response_format: { type: 'json_object' }` for structured data
 - Always parse `response.choices[0].message.content` as string — even with json_object it returns a string
 - Always validate parsed JSON before using — wrap in try/catch
+- **`json_object` guarantees valid JSON only for a response that completed.** Hitting
+  the token ceiling truncates mid-object and `JSON.parse` throws. Check
+  `finish_reason === "length"` so the log distinguishes a truncation from a malformed
+  response
+- **Validate the parsed object with zod, the same as a database row.** A model response
+  is untrusted input; `.catch()` per field degrades one drifted value instead of losing
+  the whole call. See `ExtractionSchema` in `lib/resume-extraction.ts`
+- **Put today's date in the prompt whenever dates are being reasoned about.** A resume
+  reading "March 2022 — Present" is unresolvable without it, and a model left to assume
+  the present anchors on its own training cutoff — this read seven years of experience
+  as four until the date was supplied
 - Match threshold is always `MATCH_THRESHOLD` from `lib/utils.ts` — never hardcode 70
 - Company research synthesis must always return a complete dossier — never return empty even if browser research failed
 
@@ -711,28 +726,40 @@ Only use these — others are silently ignored:
 
 **Check first:** Check AGENTS.md for an installed pdf-parse skill.
 
-### Extract Text from Uploaded Resume
+### Extract Text from a Stored Resume
+
+> Corrected against the installed package. This section previously showed
+> `import pdf from "pdf-parse"` and `await pdf(buffer)` — that is the v1 API and it
+> does not exist in the installed v2.4.5. v2 is a class built on pdfjs-dist.
+> Verified against `node_modules/pdf-parse/dist/pdf-parse/esm/PDFParse.d.ts`.
 
 ```typescript
-import pdf from "pdf-parse";
+import { PDFParse } from "pdf-parse";
 
-// In API route handling resume upload
-export async function POST(req: NextRequest) {
-  const formData = await req.formData();
-  const file = formData.get("resume") as File;
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
+const parser = new PDFParse({ data: new Uint8Array(arrayBuffer) });
 
-  const pdfData = await pdf(buffer);
-  const extractedText = pdfData.text; // raw text content
-
-  // Send to GPT-4o for structured extraction
+try {
+  const result = await parser.getText();
+  const extractedText = result.text; // raw text content
+} finally {
+  await parser.destroy();
 }
 ```
 
 **Rules:**
 
 - Server-side only — never import in client components
-- `pdfData.text` is raw unformatted text — GPT-4o handles the structure extraction
-- Always handle parse errors — some PDFs are image-based and return empty text
-- If `pdfData.text` is empty or very short — return error to user: "Could not extract text from this PDF. Please try a different file."
+- `next.config.ts` must list `pdf-parse` in `serverExternalPackages`. It pulls
+  `pdfjs-dist` and `@napi-rs/canvas`, a platform-specific native binding, and bundling
+  either breaks the worker resolution pdfjs does at runtime
+- `data` takes a `Uint8Array`. A Node `Buffer` is accepted and converted, but the
+  constructor's own docs recommend a TypedArray
+- **Always `await parser.destroy()` in a `finally`** — pdfjs holds a worker open per
+  document, and skipping it leaks one per call for the life of the server process
+- `result.text` is raw unformatted text and includes a `-- n of m --` page footer per
+  page — GPT-4o handles the structure extraction
+- Always handle parse errors — a corrupt, encrypted, or non-PDF file throws rather
+  than returning empty text
+- If the text is empty or very short — return to the user: "Could not extract text
+  from this PDF. Please try a different file." `lib/resume-extraction.ts` uses a
+  200-character floor; a real one-page resume runs past 1,500
