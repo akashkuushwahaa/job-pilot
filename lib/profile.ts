@@ -207,6 +207,61 @@ export function toFormValues(profile: ProfileFields | null): ProfileFormValues {
 // from the session — the field is disabled in the UI, so a payload carrying a
 // different one is tampering. resume_path is owned entirely by the resume route
 // and must never be overwritten by a profile save.
+const TEXT_KEYS = [
+  "full_name",
+  "email",
+  "phone",
+  "location",
+  "linkedin_url",
+  "portfolio_url",
+  "work_authorization",
+  "current_title",
+  "experience_level",
+  "years_experience",
+  "job_titles_seeking",
+  "remote_preference",
+  "salary_expectation",
+  "preferred_locations",
+] as const satisfies ReadonlyArray<keyof ProfileFormValues>;
+
+function sameList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry === b[index]);
+}
+
+function sameRole(a: WorkExperienceEntry, b: WorkExperienceEntry): boolean {
+  return (
+    a.company === b.company &&
+    a.title === b.title &&
+    a.start_date === b.start_date &&
+    // "" and null both mean "no end date" — they arrive from different places
+    // (an empty control, a jsonb null) and must not read as a difference.
+    (a.end_date ?? "") === (b.end_date ?? "") &&
+    a.currently_working === b.currently_working &&
+    a.responsibilities === b.responsibilities
+  );
+}
+
+// Compared field by field rather than by JSON.stringify: work_experience entries
+// reach the form from three places — EMPTY_ROLE, resume extraction, and a jsonb
+// column that returns its keys in Postgres's own order — so two structurally
+// identical roles can serialise to different strings.
+export function isSameFormValues(
+  a: ProfileFormValues,
+  b: ProfileFormValues,
+): boolean {
+  return (
+    TEXT_KEYS.every((key) => a[key] === b[key]) &&
+    sameList(a.skills, b.skills) &&
+    sameList(a.industries, b.industries) &&
+    a.work_experience.length === b.work_experience.length &&
+    a.work_experience.every((role, index) => sameRole(role, b.work_experience[index])) &&
+    a.education.degree === b.education.degree &&
+    a.education.field === b.education.field &&
+    a.education.institution === b.education.institution &&
+    a.education.graduation_year === b.education.graduation_year
+  );
+}
+
 export function toProfileRow(
   values: ProfileFormValues,
   userId: string,

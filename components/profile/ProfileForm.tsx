@@ -62,12 +62,13 @@ type Status = { kind: "error" | "success"; message: string } | null;
 type Props = {
   values: ProfileFormValues;
   setValues: Dispatch<SetStateAction<ProfileFormValues>>;
+  onSaved: (values: ProfileFormValues) => void;
 };
 
 // Controlled by ProfileWorkspace. The values live a level up because the Extract
 // button in the Resume card writes to them too — but everything that interprets
 // them, including adopting what a save normalised, still belongs here.
-export function ProfileForm({ values, setValues }: Props) {
+export function ProfileForm({ values, setValues, onSaved }: Props) {
   const [status, setStatus] = useState<Status>(null);
   const [isSaving, startSaving] = useTransition();
 
@@ -104,9 +105,12 @@ export function ProfileForm({ values, setValues }: Props) {
       if (result.success) {
         // Adopt what was actually stored — trimmed, comma lists split, blank
         // roles dropped — so the form shows the row rather than the draft.
-        if (result.values) {
-          setValues(result.values);
-        }
+        const stored = result.values ?? values;
+
+        setValues(stored);
+        // The same values become the workspace's picture of the saved row, so
+        // the Generate button stops reporting the form as ahead of it.
+        onSaved(stored);
         setStatus({ kind: "success", message: "Profile saved." });
         return;
       }
