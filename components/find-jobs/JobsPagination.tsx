@@ -1,10 +1,21 @@
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
+
+import { Button, buttonVariants } from "@/components/ui/button";
+import { JOBS_PAGE_SIZE, jobsHref } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
+import type { JobQuery } from "@/types";
 
 type Props = {
-  page: number;
-  pageSize: number;
+  query: JobQuery;
   totalResults: number;
+};
+
+type ControlProps = {
+  href: string | null;
+  label: string;
+  ariaLabel: string;
+  current?: boolean;
+  className?: string;
 };
 
 // First page, last page, and a three-wide window around the current one. The
@@ -27,14 +38,57 @@ function pageItems(page: number, totalPages: number): (number | "gap")[] {
   return items;
 }
 
+// A control that navigates is a Link carrying buttonVariants; a control with
+// nowhere to go is a disabled Button. Previous on page one has no href because
+// there is no such page — that is a real state, not a missing one, and an <a>
+// cannot express it.
+function PageControl({
+  href,
+  label,
+  ariaLabel,
+  current,
+  className,
+}: ControlProps) {
+  const classes = cn(
+    className,
+    current &&
+      "border-accent/30 bg-accent-muted text-accent hover:bg-accent-light",
+  );
+
+  if (href === null) {
+    return (
+      <Button
+        type="button"
+        variant="secondary"
+        disabled
+        aria-label={ariaLabel}
+        className={classes}
+      >
+        {label}
+      </Button>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      aria-label={ariaLabel}
+      aria-current={current ? "page" : undefined}
+      className={buttonVariants({ variant: "secondary", className: classes })}
+    >
+      {label}
+    </Link>
+  );
+}
+
 // Page count is derived from the totals rather than passed in, so "showing 1 to
-// 6 of 24" and the page buttons can never disagree. Every control is inert until
-// feature 11 — Previous is disabled on the first page because there is nowhere
-// to go, not because the logic is missing.
-export function JobsPagination({ page, pageSize, totalResults }: Props) {
-  const totalPages = Math.max(1, Math.ceil(totalResults / pageSize));
-  const from = (page - 1) * pageSize + 1;
-  const to = Math.min(page * pageSize, totalResults);
+// 6 of 24" and the page buttons can never disagree. Every href carries the whole
+// query, so paging never silently drops the filter that produced the list.
+export function JobsPagination({ query, totalResults }: Props) {
+  const totalPages = Math.max(1, Math.ceil(totalResults / JOBS_PAGE_SIZE));
+  const page = query.page;
+  const from = (page - 1) * JOBS_PAGE_SIZE + 1;
+  const to = Math.min(page * JOBS_PAGE_SIZE, totalResults);
 
   return (
     <div className="flex flex-col gap-4 border-t border-border px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -47,9 +101,11 @@ export function JobsPagination({ page, pageSize, totalResults }: Props) {
       </p>
 
       <nav aria-label="Jobs pagination" className="flex items-center gap-2">
-        <Button type="button" variant="secondary" disabled={page === 1}>
-          Previous
-        </Button>
+        <PageControl
+          href={page > 1 ? jobsHref({ ...query, page: page - 1 }) : null}
+          label="Previous"
+          ariaLabel="Previous page"
+        />
 
         {pageItems(page, totalPages).map((item, index) =>
           item === "gap" ? (
@@ -61,26 +117,22 @@ export function JobsPagination({ page, pageSize, totalResults }: Props) {
               …
             </span>
           ) : (
-            <Button
+            <PageControl
               key={item}
-              type="button"
-              variant="secondary"
-              aria-label={`Page ${item}`}
-              aria-current={item === page ? "page" : undefined}
-              className={cn(
-                "w-9 px-0",
-                item === page &&
-                  "border-accent/30 bg-accent-muted text-accent hover:bg-accent-light",
-              )}
-            >
-              {item}
-            </Button>
+              href={jobsHref({ ...query, page: item })}
+              label={String(item)}
+              ariaLabel={`Page ${item}`}
+              current={item === page}
+              className="w-9 px-0"
+            />
           ),
         )}
 
-        <Button type="button" variant="secondary" disabled={page === totalPages}>
-          Next
-        </Button>
+        <PageControl
+          href={page < totalPages ? jobsHref({ ...query, page: page + 1 }) : null}
+          label="Next"
+          ariaLabel="Next page"
+        />
       </nav>
     </div>
   );

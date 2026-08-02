@@ -6,25 +6,22 @@ import { AppNavbar } from "@/components/layout/AppNavbar";
 import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
 import { createInsforgeServer } from "@/lib/insforge-server";
-import { parseJobList } from "@/lib/jobs";
+import { fetchJobPage, parseJobQuery } from "@/lib/jobs";
 import { parseProfile } from "@/lib/profile";
 
-// build-plan.md feature 11 specifies 20 per page. The controls that would move
-// off page 1 — the filter bar, both sorts, the pagination buttons — are still
-// inert; feature 11 wires them to this same read.
-const PAGE_SIZE = 20;
+type Props = {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+};
 
-export default async function FindJobsPage() {
+export default async function FindJobsPage({ searchParams }: Props) {
   const user = await requireUser();
   const insforge = await createInsforgeServer();
+  const query = parseJobQuery(await searchParams);
 
-  const [profileResult, jobsResult] = await Promise.all([
+  const [profileResult, jobPage] = await Promise.all([
     insforge.database.from("profiles").select("*").eq("id", user.id).maybeSingle(),
-    insforge.database
-      .from("jobs")
-      .select("id, company, title, match_score, salary, found_at")
-      .eq("user_id", user.id)
-      .order("found_at", { ascending: false }),
+    // Throws on a read failure, for the reason below.
+    fetchJobPage(insforge, user.id, query),
   ]);
 
   // Both reads are deliberately fatal, following the profile page: degrading a
@@ -35,13 +32,12 @@ export default async function FindJobsPage() {
     throw new Error("Find Jobs unavailable");
   }
 
-  if (jobsResult.error) {
-    console.error("[find-jobs/page] jobs read failed", jobsResult.error);
-    throw new Error("Find Jobs unavailable");
-  }
-
   const profile = parseProfile(profileResult.data);
-  const jobs = parseJobList(jobsResult.data);
+  // The page the read actually landed on, which is not always the one asked for
+  // — a stale ?page= is clamped. The controls all work from this, so the URL and
+  // what is on screen cannot disagree.
+  const listQuery = { ...query, page: jobPage.page };
+  const isFiltered = query.text.length > 0 || query.match !== "all";
 
   return (
     <>
@@ -54,15 +50,14 @@ export default async function FindJobsPage() {
             blocked={!completeness(profile).isComplete}
           />
 
-          <JobFilters />
+          <JobFilters query={listQuery} />
 
           <section className="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
-            <JobsTable jobs={jobs} />
-            {jobs.length > 0 ? (
+            <JobsTable jobs={jobPage.jobs} filtered={isFiltered} />
+            {jobPage.total > 0 ? (
               <JobsPagination
-                page={1}
-                pageSize={PAGE_SIZE}
-                totalResults={jobs.length}
+                query={listQuery}
+                totalResults={jobPage.total}
               />
             ) : null}
           </section>
