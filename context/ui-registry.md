@@ -39,6 +39,27 @@ rounded-xl border border-border bg-surface p-6 shadow-sm
 `rounded-xl` resolves to 16px because `@theme` overrides `--radius-xl`. `shadow-sm` is
 byte-identical to the card shadow in `ui-tokens.md`.
 
+### Card — list variant
+
+A card whose contents run edge to edge: table rows separated by full-width rules, and a footer
+divided by one. Same recipe with the padding dropped and `overflow-hidden`, so the rows are clipped
+by the radius instead of poking through it. Padding moves onto the cells (`px-6 py-4`).
+
+```
+overflow-hidden rounded-xl border border-border bg-surface shadow-sm
+```
+
+### Input with a leading icon
+
+Same relative/absolute shape `Select` uses for its chevron, mirrored to the left. The icon is
+`aria-hidden` and `pointer-events-none` so the whole field stays one click target.
+
+```
+wrapper: relative
+icon:    pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-text-muted
+input:   Input className="pl-9"   — twMerge lets pl-9 beat the base px-3
+```
+
 ### Section rhythm
 
 - Section on page background: `bg-background py-20`
@@ -77,6 +98,7 @@ Three coexist deliberately. They are not interchangeable and must not be merged.
 | `text-xs font-medium tracking-wider text-text-muted uppercase`       | **Display field label** — `dl` keys in DossierPreview etc. |
 | `text-xs font-semibold tracking-wide text-text-dark uppercase`       | **Form field label** — every `<label>` on a form control   |
 | `text-xs font-semibold tracking-wide text-error-dark uppercase`      | **Missing-field tag** — `CompletionIndicator` only         |
+| `text-xs font-medium tracking-wider text-text-secondary uppercase`   | **Table column header** — every `th` in `JobsTable`         |
 
 A form label has to carry more weight than a read-only one: it is the click target for its control
 and the thing a user scans when hunting for the field they still have to fill.
@@ -708,6 +730,147 @@ column that returns its keys in Postgres's own order, so identical roles can ser
 database — that is the entire point of extraction — so an action that silently reads the row while
 the user is looking at unsaved values produces a result they cannot account for. `generateBlocker`
 is computed here and passed down as a reason, not a boolean.
+
+### SearchControls — `components/find-jobs/SearchControls.tsx`
+
+File: `components/find-jobs/SearchControls.tsx`
+Last updated: 2026-08-02
+
+| Property         | Class                                                              |
+| ---------------- | ------------------------------------------------------------------ |
+| Background       | `bg-surface` (card recipe)                                         |
+| Border           | `border border-border`                                             |
+| Border radius    | `rounded-xl` (card), `rounded-lg` (banner)                         |
+| Text — primary   | inherited from `Input`                                             |
+| Text — success   | `text-sm text-success-foreground` (banner copy)                    |
+| Spacing          | `p-6` card, `gap-4` field row, `mt-4 px-4 py-3` banner             |
+| Hover state      | inherited from `Button`                                            |
+| Shadow           | `shadow-sm`                                                        |
+| Accent usage     | primary `Find Jobs` button                                         |
+
+**Pattern notes:**
+`grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end` — two `Field`s and the button on one row.
+`items-end` is what lines the button up with the input bottoms, since the button has no label above
+it. JOB TITLE uses the leading-icon input; LOCATION does not, matching the design.
+
+**Buttons on a field row state their own height.** `Button` size `md` is `h-9` while every form
+control is `h-10`, so `Find Jobs` carries `className="h-10 px-5"`. Changing `md` to `h-10` globally
+was considered and declined — it would move every button in the app to fix one row.
+
+**Search-result banner** — the third variant of the status-banner family, and the only one that is
+not `text-text-primary`:
+
+```
+flex items-center gap-2 rounded-lg border border-success/30 bg-success-lightest px-4 py-3 text-sm text-success-foreground
+└ icon: Sparkles size-4 shrink-0 text-success
+```
+
+`text-success-foreground` (#007A55) on `bg-success-lightest` measures 5.4:1, and `ui-tokens.md`
+already pairs those two for matched-skill badges — so the design's green copy is on-token and above
+the AA floor. The error banner cannot do the same because `--color-error` has no accessible pair.
+`role="status"`, since the message reports the result of an action the user asked for.
+
+### JobFilters — `components/find-jobs/JobFilters.tsx`
+
+File: `components/find-jobs/JobFilters.tsx`
+Last updated: 2026-08-02
+
+| Property         | Class                                                     |
+| ---------------- | --------------------------------------------------------- |
+| Background       | `bg-surface`                                              |
+| Border           | `border border-border`; divider `bg-border`               |
+| Border radius    | `rounded-xl`                                              |
+| Text             | inherited from `Input` / `Select`                         |
+| Spacing          | `px-4 py-3`, `gap-4` row, `gap-3` between the two selects |
+| Shadow           | `shadow-sm`                                               |
+| Accent usage     | focus ring only                                           |
+
+**Pattern notes:**
+A bar, not a form: `flex flex-col gap-4 … sm:flex-row sm:items-center`, filter input on `flex-1`,
+then a divider, then the two selects.
+
+- **Borderless input inside a bordered card.** `Input className="border-transparent pl-9"` — the
+  card's own border is the one the user sees, and `focus:border-accent` still fires on focus, so the
+  field does not lose its focus affordance. Use this whenever a control fills a card edge to edge.
+- **Vertical divider:** `hidden h-8 w-px shrink-0 bg-border sm:block`, `aria-hidden`. It disappears
+  with the row at `sm` because a horizontal rule between stacked controls reads as a section break.
+- **Select as a button.** `Select className="w-auto font-medium"` — `w-auto` beats `fieldSurface`'s
+  `w-full` through twMerge, and the heavier weight is what makes it read as a control rather than a
+  field. Both selects are labelled with `aria-label`; the design draws no visible label.
+
+### JobsTable — `components/find-jobs/JobsTable.tsx`
+
+File: `components/find-jobs/JobsTable.tsx`
+Last updated: 2026-08-02
+
+| Property         | Class                                                                |
+| ---------------- | -------------------------------------------------------------------- |
+| Background       | transparent — the page wraps it in the list-variant card             |
+| Border           | `border-b border-border` per row, `last:border-b-0`                  |
+| Text — header    | `text-xs font-medium tracking-wider text-text-secondary uppercase`   |
+| Text — primary   | `text-sm text-text-primary` (role, salary), `font-semibold` (company) |
+| Text — secondary | `text-sm text-text-secondary` (date found)                           |
+| Text — muted     | `text-sm text-text-muted` (missing salary, empty state)              |
+| Spacing          | `px-6 py-4` every cell, header included                              |
+| Hover state      | `hover:bg-surface-secondary` on the row                              |
+| Accent usage     | none — score colour comes from success / info / warning              |
+
+**Pattern notes:**
+A real `<table>` inside `overflow-x-auto`, `w-full min-w-[720px]`. Five columns; there is no SOURCE
+column — see the correction note in `build-plan.md`.
+
+- **Company chip:** `grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-secondary text-text-secondary` with a `Building2` at `size-4`. Reuse for any "logo goes here" slot until real logos exist.
+- **Match score bar:** track `h-1 w-24 shrink-0 overflow-hidden rounded-full bg-border-light lg:w-32`, fill `block h-full rounded-full` + `matchScoreFill(score)` from `lib/utils.ts`. The track is `aria-hidden` because the percentage sits right beside it — one reading, not two.
+- **The fill width is the project's only inline style.** A percentage is a value, not a token, so it
+  cannot be a class. `code-standards.md`'s no-inline-styles rule is about styling; this is data.
+- **Rows are not links.** `/find-jobs/[id]` lands in feature 12 and a row that navigates to a 404 is
+  worse than one that does not navigate. The hover state is kept, so only the `href` is missing.
+
+**Empty state** — `ui-rules.md`'s recipe, icon above muted text, no CTA (the CTA is the search card
+already on the page):
+
+```
+wrapper: flex flex-col items-center px-6 py-16 text-center
+icon:    grid size-12 place-items-center rounded-full border border-border bg-surface-secondary text-text-muted
+copy:    mt-4 max-w-sm text-sm text-text-muted
+```
+
+### JobsPagination — `components/find-jobs/JobsPagination.tsx`
+
+File: `components/find-jobs/JobsPagination.tsx`
+Last updated: 2026-08-02
+
+| Property         | Class                                                              |
+| ---------------- | ------------------------------------------------------------------ |
+| Border           | `border-t border-border` — it is the list card's footer            |
+| Text — secondary | `text-sm text-text-secondary` ("Showing … results")                |
+| Text — primary   | `font-semibold text-text-primary` (the three numerals)             |
+| Spacing          | `px-6 py-4`, `gap-2` between controls                              |
+| Accent usage     | current page — `border-accent/30 bg-accent-muted text-accent hover:bg-accent-light` |
+
+**Pattern notes:**
+Takes `page` / `pageSize` / `totalResults` and derives the page count itself, so the count sentence
+and the page buttons cannot disagree. Page buttons are `Button variant="secondary"` squared off with
+`w-9 px-0`; the current one is that same button re-coloured and carries `aria-current="page"`.
+Every button also carries `aria-label="Page N"` — a bare numeral is not a label.
+
+Page numbers are first, last, and a three-wide window: `1 2 3 … 8` at page 1, `1 … 4 5 6 … 8` at
+page 5, `1 … 5 6 7 8` at page 8, and no ellipsis at all under six pages. Previous is disabled on
+the first page and Next on the last, which is a real state rather than missing logic.
+
+### Find Jobs page — `app/find-jobs/page.tsx`
+
+`AppNavbar` + `main.flex-1.bg-background` + the shared page container
+`mx-auto w-full max-w-[1440px] space-y-6 px-6 py-8`. Three stacked cards — search controls, filter
+bar, and the list-variant card holding `JobsTable` + `JobsPagination` — then the "Jobs by Adzuna"
+credit at `text-xs text-text-muted`.
+
+Unlike `/profile`, this page uses the full 1440px container: a table is scanned across, not read
+down a column.
+
+**Nothing on this page is a Client Component.** Every control is uncontrolled or inert, so feature
+09 ships no JavaScript of its own. Features 10 and 11 add the client boundaries where they are
+actually needed.
 
 ### Profile page — `app/profile/page.tsx`
 

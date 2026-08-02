@@ -165,9 +165,15 @@ background track: #E7EAF3
 
 Fill color by score:
 
-- 80-100%: `#10B981` (green)
-- 60-79%: `#61A8FF` (blue)
-- Below 60%: `#FF8904` (orange)
+- 90-100%: `#10B981` (green) — `bg-success`
+- 80-89%: `#61A8FF` (blue) — `bg-info`
+- Below 80%: `#FF8904` (orange) — `bg-warning`
+
+> Corrected against `context/designs/find-jobs.png` in feature 09. This section said 80/60 and
+> `ui-tokens.md`'s Match Score Colors table said 90/70/50 — the two disagreed with each other, and
+> both disagreed with the design, which draws 96 and 91 green, 88 and 85 blue, and 72 orange. The
+> rendered design is the tiebreaker for a visual decision. The bands live in one place now:
+> `matchScoreFill()` in `lib/utils.ts`. Never re-derive them at a call site.
 
 ---
 

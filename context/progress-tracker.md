@@ -6,14 +6,13 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 2 — Profile Page, complete
-**Last completed:** 08 Resume PDF Generation from Profile. `POST /api/resume/generate` reads the
-caller's saved row, has GPT-4o write the summary and the bullets, renders them with
-`@react-pdf/renderer` alongside the row's own facts, and uploads the result over the one stored
-resume. Gated on `completeness().isComplete` and on the form matching the saved row, and confirmed
-before it replaces an existing resume. Exercised against the live model end to end; not yet clicked
-in a browser — see Notes.
-**Next:** Phase 3 — 09 Find Jobs Page (Full UI).
+**Phase:** Phase 3 — Find Jobs Page, in progress
+**Last completed:** 09 Find Jobs Page (Full UI). `/find-jobs` no longer renders `ComingSoon` — it is
+the real page on mock data: search controls with the result banner, the filter bar, the jobs table
+with colour-coded score bars, and derived pagination. Every control is inert or uncontrolled, so the
+whole page is server-rendered with no client JavaScript. Markup verified through a temporary preview
+route; not yet clicked in a browser.
+**Next:** 10 Adzuna Job Discovery — wires the Find Jobs button to `POST /api/agent/find`.
 
 ---
 
@@ -35,7 +34,7 @@ in a browser — see Notes.
 
 ### Phase 3 — Find Jobs Page
 
-- [ ] 09 Find Jobs Page — Full UI
+- [x] 09 Find Jobs Page — Full UI
 - [ ] 10 Adzuna Job Discovery
 - [ ] 11 Filter + Sort + Pagination
 
@@ -578,11 +577,66 @@ the generated resume carries contact details on purpose — but no job preferenc
 or work authorization appear anywhere. `tsc`, lint and build clean, every route `ƒ`. Anonymous
 `POST /api/resume/generate` 307s to `/login`.
 
+### Feature 09 — Find Jobs Page (Full UI)
+
+UI only, on mock data, exactly as the build plan scopes it. Four components under
+`components/find-jobs/`, matching `architecture.md`'s listing name for name.
+
+Decisions:
+
+- **The SOURCE column was not built.** The design does not draw it, and it could only ever carry one
+  value: `jobs.source` is `'search' | 'url'`, discovery is Adzuna-only, and URL import is out of
+  scope in `project-overview.md`. A column with one constant value is noise. The "Jobs by Adzuna"
+  credit that `project-overview.md` requires on job listings carries the same information and is
+  rendered under the card. Same call as feature 01 made on `jobs-lists.png`'s LinkedIn badges.
+- **Match score bands come from the design: 90 green / 80 blue / below orange.** `ui-rules.md` said
+  80/60 and `ui-tokens.md` said 90/70/50 — they disagreed with each other and both disagreed with
+  the rendered design, which draws 88 and 85 blue. The design broke the tie for a visual decision;
+  `ui-rules.md` corrected. Now one function, `matchScoreFill()` in `lib/utils.ts`, so feature 12's
+  `MatchScore` cannot drift from the list.
+- **The design's pagination is internally inconsistent** — "1 to 6 of 24 results" beside eight page
+  buttons, where 24 at 6 per page is four pages. `JobsPagination` derives the page count from
+  `totalResults / pageSize` so the sentence and the buttons cannot disagree, and the mock totals 48
+  so the ellipsis and page 8 still render as drawn. Feature 11 passes 20 per page and the real count.
+- **Rows do not link yet.** `/find-jobs/[id]` arrives in feature 12; a row navigating to a 404 is
+  worse than one that does not navigate. The hover state `ui-rules.md` specifies is in place, so
+  feature 12 adds only the `href`.
+- **No Client Components at all.** Uncontrolled inputs and inert buttons need no state, so the page
+  ships zero JavaScript of its own. Features 10 and 11 add the boundaries where they are needed —
+  putting them in now would be guessing at where.
+- **`found_at` is stored as a real ISO timestamp in the mock, not as "2 hours ago".**
+  `formatRelativeTime()` in `lib/utils.ts` renders the column, so feature 11 changes the data source
+  and nothing else. `Intl.RelativeTimeFormat` with `numeric: "auto"` is what produces "Yesterday"
+  rather than "1 day ago".
+- **A button on a field row states its own height.** `Button` `md` is `h-9`, form controls are
+  `h-10`. Changing `md` globally was considered and declined — it would move every button in the app
+  to fix one row.
+
+**Verified by execution:** `npx tsc --noEmit`, `npm run lint` and `npm run build` all clean, every
+route still `ƒ`, and `/find-jobs` still 307s to `/login` while signed out. A temporary preview route
+(since deleted, confirmed 404) rendered the components unauthenticated and the markup was read back:
+94 → `bg-success`, 88 → `bg-info`, 72 → `bg-warning`; "2 hours ago" / "Yesterday" / "4 days ago";
+a null salary → "Not listed"; the empty state; and all four pagination shapes — `1 2 3 … 8` at page
+1, `1 … 4 5 6 … 8` at page 5, `1 … 5 6 7 8` at page 8, `1 2` at twelve results. Also confirmed in
+the emitted HTML that twMerge resolved every override as intended: `w-auto` beat `w-full` on the
+selects, `border-transparent` beat `border-border` on the filter input, `pl-9` beat `px-3`, and the
+current page button dropped `bg-surface` / `border-border` / `text-text-primary` for the accent set.
+
 ---
 
 ## Notes
 
 _Add notes here as the build progresses — workarounds, patterns, anything that differs from the context files._
+
+- **Feature 09 is UI only and every control is inert.** The Find Jobs button has no handler
+  (feature 10), and the filter input, both selects and every pagination button are uncontrolled or
+  do nothing (feature 11). The success banner is a hardcoded string, not the result of a run. The
+  six rows come from `mockJobs()` in `app/find-jobs/page.tsx` — delete it in feature 11 and replace
+  it with a read scoped to `user_id`, the same way `mockProfile()` was deleted in feature 06.
+- **Feature 09 has not run in a browser.** Unexercised: the horizontal scroll under 720px, the
+  responsive stacking of the search row and the filter bar, the row hover, select focus rings, and
+  how the table reads on a phone. `/find-jobs` is also the one protected page a signed-in user has
+  never seen anything real on.
 
 - **Feature 08 has not run in a browser, and has never run against a real profile row.** Everything
   verified above went through a fixture in a temporary route. Unexercised: the confirm step, the two
