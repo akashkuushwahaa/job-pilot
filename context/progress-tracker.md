@@ -46,7 +46,7 @@ has since added ten more US rows.
 ### Phase 4 — Job Details Page
 
 - [x] 12 Job Details Page — Full UI
-- [ ] 13 Company Research Agent
+- [x] 13 Company Research Agent
 
 ### Phase 5 — Dashboard
 
@@ -985,6 +985,135 @@ verification routes deleted and confirmed 404.
 **Still not verified: the page has never rendered for a signed-in user.** The crash is explained and
 the server is healthy, but that is not the same as the route being proven — a browser pass is still
 what closes features 11 and 12.
+
+---
+
+### Feature 13 — Company Research Agent
+
+The Research Company button feature 12 shipped inert now runs, and the same run backfills the job
+description. One click, one job, one Browserbase session.
+
+**Built**
+
+- `app/api/agent/research/route.ts` — POST `{ jobId }`. Auth, uuid check, the job read scoped to the
+  caller, the same completeness gate `/api/agent/find` applies, then the run. Exports
+  `maxDuration = 300`.
+- `agent/research.ts` — the orchestrator. Resolve → backfill → browse → synthesise → save.
+- `agent/posting.ts` — follows the Adzuna redirect. Produces both the employer homepage URL and the
+  posting HTML the backfill reads. Also `rootDomain`, `homepageFor`, `htmlToText`, `extractPosting`.
+- `agent/browsing.ts` — the Stagehand phase. Homepage extract, sub-page ranking, up to three visits.
+- `agent/synthesis.ts` — GPT-4o dossier from research + job + profile.
+- `lib/browserbase.ts`, `lib/stagehand.ts` — session creation and client init. Both return `null`
+  rather than throwing.
+- `lib/dossier.ts` — the dossier zod schema, used on write *and* on read.
+- `components/job-details/CompanyResearch.tsx` rewritten to render the nine-field dossier;
+  `ResearchButton.tsx` is the new and only client boundary on the page.
+- `lib/jobs.ts` gained `company_research` in both the select and `JobDetailSchema`; `types/index.ts`
+  gained `CompanyDossier`.
+- Corrected in `library-docs.md` and `architecture.md`: the Stagehand API, the `maxDuration` advice,
+  and the synthesis token budget. All three are recorded below.
+
+**Decisions**
+
+- **Every phase before the synthesis may fail without ending the run.** The deliverable is a
+  dossier; GPT-4o can write one from the job and the profile alone. Only a missing or unsaveable
+  dossier is a failure the user hears about.
+- **The homepage comes from the redirect, and the ATS domains are refused.** `boards.greenhouse.io`
+  stripped to its root domain is Greenhouse — the browser would research the ATS vendor and report
+  its culture as the employer's. `NOT_THE_EMPLOYER` in `agent/posting.ts` sends those to the
+  company-name guess instead, which is wrong less often.
+- **The backfill shares the dossier's fetch.** The redirect hop has to happen anyway to find the
+  employer; the posting body is on the page it lands on. No second scraper.
+- **The truncation note in `JobDescription` was kept, not deleted.** `build-plan.md` said to delete
+  it in the change that fills the column. It keys on the ellipsis rather than on a feature flag, so
+  a successful backfill removes it by itself and a failed one leaves it true. Deleting it would have
+  lied on every job the backfill cannot reach. Verified both directions.
+- **`sources` is set from the pages actually visited, never asked of the model.** A model asked to
+  name its sources produces plausible URLs, and these render as links.
+- **The dossier is parsed on read as well as on write.** `jsonb` is unchecked by Postgres, so the
+  column is exactly as untrusted as the model response was.
+- No new PostHog event. `company_researched` was already in `code-standards.md`; it now fires.
+
+**Verified by execution** — 32 checks over the pure logic, all passing:
+
+- `rootDomain` across plain, `www`, deep-subdomain, `.co.uk` and `.com.au` hosts, plus a bare label.
+- `homepageFor` with an employer domain, Greenhouse, Workday, Adzuna itself, no landed URL at all,
+  and an unusable company name.
+- `htmlToText` dropping script contents, resolving entities, and — after a fix this pass — not
+  leaving every paragraph indented by one space.
+- `parseDossier` over a clean dossier, `null`, `undefined`, a bare string, an array, `{}`, an
+  all-empty dossier, and a drifted one where a string arrived where an array belonged. Each drifted
+  field degrades alone; the good fields survive. A `javascript:` URL in `sources` is dropped and a
+  duplicate collapsed.
+- `fetchJob` over an untouched row, a researched-and-backfilled row, junk jsonb and a string in the
+  jsonb column. Confirms `company_research` is in the select, survives the parse, and that
+  `isTruncatedDescription` is `true` before the backfill and `false` after.
+
+`npx tsc --noEmit`, `npm run lint` and `npm run build` all clean; `/api/agent/research` registered.
+
+**Not verified — the whole run has never executed.** No Browserbase session has ever been created
+from this codebase, so the browser phase, the extraction schemas, the synthesis prompt, the dossier
+card's rendering and the `company_researched` event are all unexercised. One real click is what
+closes this feature, and it costs a Browserbase session plus two GPT-4o calls.
+
+---
+
+### Feature 13 — issues found by `/review` and fixed
+
+Nine, all closed in the same pass. Three of them are rules, not patches.
+
+- **The company-name fallback mangled ordinary names.** The suffix regex was unanchored with a `\s*`
+  that matches nothing, so `co\.?\b` matched *inside* a name and took everything after it: **Cisco
+  Systems → `cis.com`, Costco Wholesale → `cost.com`, Tesco PLC → `tes.com`, Nordco Industries →
+  `nord.com`.** Every one is a real domain, so the browser would have researched a different company
+  and reported it as the employer, with `sources` linking to it — the same failure
+  `NOT_THE_EMPLOYER` exists to prevent, arriving from the other direction. The separator is now
+  required and the match anchored to the end, and it loops for "Acme Holdings Pty Ltd". Caught by
+  running the function over a list of real names, not by reading it.
+- **SSRF through `jobs.source_url`.** The redirect-follow fetched a DB column server-side with
+  `redirect: "follow"`, and `safeExternalUrl` checks only the scheme. The `jobs_owner` policy is
+  `ALL`, so any signed-in user could insert a row pointing at `169.254.169.254` or a loopback port,
+  click Research, and have the response structured by GPT-4o and rendered back to them. New in
+  feature 13 — feature 10 never fetched this column. `lib/safe-fetch.ts` now resolves the hostname
+  and refuses loopback, link-local, RFC 1918, CGNAT and IPv4-mapped-IPv6, **re-checking every
+  redirect hop** because passing the first host check says nothing about where a 302 points. Now an
+  `architecture.md` invariant.
+- **A Browserbase session leaked whenever Stagehand failed to init.** `stagehand.close()` releases
+  the session it owns — but on a failed init there is no client to close, and the session held the
+  free plan's only slot for its full 120 seconds. The next click would find the browser unavailable
+  for a reason nothing logs. `releaseSession()` sends `REQUEST_RELEASE` on that path only.
+- **A refresh could cost the user what the first run bought.** A second run whose browser failed
+  would overwrite a researched dossier with one inferred from the posting. Now: the backfill only
+  writes a column that is currently empty or still holds the snippet, and a browsed dossier
+  (`sources` non-empty) is never replaced by a synthesis-only one. **A re-run can only add.**
+- **An all-empty dossier reported as a failure.** `parseDossier` answered `null` for both "not a
+  dossier" and "a dossier that says nothing", so a run that worked told the user it had failed.
+  `readDossier` now returns three outcomes and the user gets "found too little about this company"
+  instead of "could not research".
+- **The browser phase had no overall bound.** Four visits at the per-step limits could run past two
+  minutes — longer than the Browserbase session itself. `BROWSE_BUDGET_MS` stops visiting sub-pages
+  once spent; what was gathered still goes to synthesis.
+- **`maxDuration = 300` is a ceiling the host may not honour.** Vercel Hobby caps at 60s. Documented
+  at the export, with the supported fallback: leave `BROWSERBASE_*` unset and every run synthesises
+  from the posting and profile alone.
+- Two style fixes: `z.uuid()` for the Zod 4 form, and `DossierSection` extracted to its own file
+  under the one-component-per-file rule, using `cn()` rather than bare ternaries.
+
+**Verified by execution** — 40 checks, all passing, plus a positive control:
+
+- The six names the old regex mangled now resolve correctly, and the suffixes that *should* strip
+  still do (`Marlabs LLC`, `Stripe Inc.`, `Wipro Limited`, `Acme Holdings Pty Ltd`). "Pty Digital"
+  keeps its name instead of returning null.
+- `safeFetchExternal` refuses all 14 of: the metadata endpoint, loopback v4 and v6, localhost by
+  name, three RFC 1918 ranges, CGNAT, IPv4-mapped IPv6, a bare hostname, `.internal`, `.local`,
+  `file:` and `javascript:`.
+- **Positive control:** `https://example.com` and a live `http://github.com` redirect chain both
+  still fetch and return 200. Every other check asserts a refusal, and a guard that refused
+  everything would have passed all of them.
+- `readDossier` returns the right one of three outcomes across five shapes; `wasBrowsed` separates a
+  browsed dossier from a synthesis-only one.
+
+`npx tsc --noEmit`, `npm run lint` and `npm run build` all clean afterwards.
 
 ---
 

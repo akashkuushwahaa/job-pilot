@@ -1048,15 +1048,21 @@ full, says who cut it and where the rest is.** Silence reads as a bug.
 ### CompanyResearch — `components/job-details/CompanyResearch.tsx`
 
 File: `components/job-details/CompanyResearch.tsx`
-Last updated: 2026-08-02 (feature 12)
+Last updated: 2026-08-02 (feature 13)
 
 | Property         | Class                                                                |
 | ---------------- | -------------------------------------------------------------------- |
 | Card             | `overflow-hidden rounded-xl border border-border bg-surface shadow-sm` — the **list variant** |
-| Header row       | `flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between` |
+| Header row       | `flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between` |
 | Divider          | `border-t border-border` on the body, edge to edge                   |
-| Icon chip        | `grid size-9 place-items-center rounded-lg bg-accent-muted text-accent` |
+| Icon chip        | `grid size-9 place-items-center rounded-lg bg-accent-muted text-accent-dark` |
 | Empty state      | `flex flex-col items-center border-t border-border px-6 py-16 text-center` |
+| Dossier body     | `border-t border-border px-6 pt-6 pb-6`                              |
+| Section label    | `text-xs font-medium tracking-wider text-text-secondary uppercase` — `MatchScore`'s eyebrow |
+| Section icon     | `size-4 text-text-muted`, or `size-4 text-accent-dark` on the highlight |
+| Bullet           | `mt-2 size-1.5 shrink-0 rounded-full bg-text-muted` — `bg-accent` on the highlight |
+| Tech stack chip  | `inline-flex items-center rounded-full bg-surface-secondary px-3 py-1 text-xs font-medium text-text-secondary` |
+| Sources link     | `text-xs break-all text-text-secondary underline underline-offset-2` |
 
 **Pattern notes:**
 
@@ -1069,10 +1075,73 @@ Last updated: 2026-08-02 (feature 12)
 - **Empty state reuses `JobsTable`'s recipe** — `size-12` bordered circle, then a
   `text-sm font-medium text-text-primary` line and muted copy — but adds the bold line above the
   muted sentence, because this empty state has a CTA to point at and the table's does not.
-- **The button is inert until feature 13.** Feature 12 is the full-UI feature and 13 is the agent,
-  the same split feature 09 and feature 10 made on Find Jobs. `company_research` is deliberately not
-  even selected by the read: a card that renders "No research yet" over a dossier that exists would
-  be worse than one that cannot render a dossier at all.
+- **Feature 13 wired the button.** The read, the dossier markup and the handler landed in one
+  change, so the card never reports "No research yet" over a dossier that exists. The button is now
+  in `ResearchButton.tsx` — see below.
+- **`text-accent-dark` on the icon chip, not `text-accent`.** Third time this project has hit the
+  rule: a fill colour is not the colour that goes on top of it. Same correction feature 12's review
+  made to the gap-skill chips, applied here for the same reason.
+- **Every section renders only if it has content, and there are nine of them.** A run whose browser
+  found a parked domain still writes a dossier, but a thin one; laying out eight headings over four
+  filled fields advertises data that is not there. Same rule as `JobDescription`.
+- **Your Edge is the only highlighted section** — accent icon and accent bullets, rendered first.
+  `build-plan.md` calls it the most valuable field, and it is the only one written about the
+  candidate rather than about the company.
+- **The section labels are eyebrows, not headings.** These are labels over blocks inside one card,
+  so they take `MatchScore`'s eyebrow rather than `JobDescription`'s `text-base font-semibold` — the
+  card already has exactly one of those, at the top.
+- **Sources render only when a browser actually visited something.** They are the pages the agent
+  read, not pages the model named, and they pass `safeExternalUrl` inside `lib/dossier.ts` before
+  they can become `href`s.
+
+### DossierSection — `components/job-details/DossierSection.tsx`
+
+File: `components/job-details/DossierSection.tsx`
+Last updated: 2026-08-02 (feature 13)
+
+One bulleted section of the dossier card — icon, eyebrow label, bullet list. Five of the nine
+dossier fields render through it.
+
+| Property   | Class                                                              |
+| ---------- | ------------------------------------------------------------------ |
+| Wrapper    | `mt-6`                                                             |
+| Icon       | `size-4 text-text-muted` — `text-accent-dark` when highlighted      |
+| Label      | `text-xs font-medium tracking-wider text-text-secondary uppercase`  |
+| Bullet     | `mt-2 size-1.5 shrink-0 rounded-full bg-text-muted` — `bg-accent` when highlighted |
+| Item       | `flex items-start gap-3 text-sm leading-6 text-text-primary`        |
+
+**Pattern notes:**
+
+- **Its own file, not a helper inside `CompanyResearch`.** `code-standards.md` puts one component
+  per file, and a second component in the card file was the review's finding.
+- **`highlight` is a one-section prop.** Only Your Edge sets it, and it is the only dossier section
+  written about the candidate rather than the company.
+- Takes a `LucideIcon`, not `typeof SomeIcon` — the library exports the type, and borrowing a
+  concrete icon's type to stand in for it reads as an accident.
+
+### ResearchButton — `components/job-details/ResearchButton.tsx`
+
+File: `components/job-details/ResearchButton.tsx`
+Last updated: 2026-08-02 (feature 13)
+
+`"use client"`. The only client boundary on the job details page — it exists for the click and the
+request, not for the content, which stays server-rendered.
+
+**Pattern notes:**
+
+- **The pill survives:** `Button` with `rounded-full`, still the only pill in the app. It switches to
+  `variant="secondary"` and "Refresh research" once a dossier exists, so re-running is offered
+  without competing with Apply Now for primary weight.
+- **The spinner is the button's own icon** — `animate-spin` on the lucide icon rather than a separate
+  element, the same treatment `SearchControls` gives its label.
+- **It says how long, not just that it is working.** A run opens a cloud browser and reads up to four
+  pages; a bare spinner on something that slow reads as hung. `role="status"` under the button, muted
+  and `text-xs`, right-aligned with it on `sm:`.
+- **No success banner.** The card filling in with the dossier is the confirmation — a banner over it
+  would say less than the thing it sat on top of. Errors still get one: `role="alert"` in the
+  standing `border-error/30 bg-error/10` treatment.
+- **`router.refresh()` after a successful run**, because the dossier is server-rendered from the
+  `jobs` row — the same pattern `SearchControls` and `ResumeUpload` use.
 
 ### JobActions — `components/job-details/JobActions.tsx`
 
