@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Building2, SearchX } from "lucide-react";
 
 import { cn, formatRelativeTime, matchScoreFill } from "@/lib/utils";
@@ -20,9 +21,11 @@ const NO_MATCHES =
 const headCell =
   "px-6 py-4 text-xs font-medium tracking-wider text-text-secondary uppercase";
 
-// Rows are not links yet — /find-jobs/[id] does not exist until feature 12, and
-// a row that navigates to a 404 is worse than one that does not navigate. The
-// hover state ui-rules.md specifies is kept, so only the href is missing.
+// Feature 12 added the href feature 09 deliberately left out. A <tr> cannot hold
+// an <a> around all five cells, so the company name is the real link and a
+// pseudo-element stretches it over the whole row — which keeps one link per row
+// for a screen reader and a full-row hit target for a mouse. The row is the
+// containing block, so it carries `relative`.
 export function JobsTable({ jobs, filtered }: Props) {
   if (jobs.length === 0) {
     return (
@@ -64,16 +67,20 @@ export function JobsTable({ jobs, filtered }: Props) {
           {jobs.map((job) => (
             <tr
               key={job.id}
-              className="border-b border-border transition-colors last:border-b-0 hover:bg-surface-secondary"
+              className="relative border-b border-border transition-colors last:border-b-0 hover:bg-surface-secondary focus-within:bg-surface-secondary"
             >
               <td className="px-6 py-4">
                 <div className="flex items-center gap-3">
                   <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-secondary text-text-secondary">
                     <Building2 aria-hidden className="size-4" />
                   </span>
-                  <span className="text-sm font-semibold text-text-primary">
+                  <Link
+                    href={`/find-jobs/${job.id}`}
+                    className="text-sm font-semibold text-text-primary before:absolute before:inset-0 before:content-[''] focus-visible:outline-none focus-visible:before:ring-1 focus-visible:before:ring-accent focus-visible:before:ring-inset"
+                  >
                     {job.company}
-                  </span>
+                    <span className="sr-only"> — {job.title}</span>
+                  </Link>
                 </div>
               </td>
 
