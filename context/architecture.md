@@ -126,7 +126,7 @@
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
 │   ├── profile.ts                         → parseProfile + both directions of the row <-> form mapping
-│   ├── jobs.ts                            → parseJobList + the discovery banner sentence
+│   ├── jobs.ts                            → parseJobList, the discovery banner sentence, and the filtered/sorted/paged jobs read
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -375,6 +375,12 @@ claims. `run_id` **is** sent, so it moves to whichever run most recently surface
 Verified against the live database in feature 10: the predicate-free statement upserts, `match_score`
 refreshed 50 → 91, `company_research` and `found_at` were untouched, and two NULL-`external_id` rows
 coexisted under the non-partial index.
+
+**Every ordering of `jobs` ends with `id`.** `found_at` defaults to `now()`, which is *transaction*
+time, so every row written by one discovery run carries the same millisecond — and `match_score` ties
+are common at ten results a run. A sort on either column alone is not a total order, and Postgres is
+free to break the ties differently per request, which on a paged read shows one row on two pages and
+another on none. `fetchJobPage` in `lib/jobs.ts` appends `id` to every sort; it is not decoration.
 
 No tailored-resume columns exist. Resume tailoring is out of scope.
 
@@ -634,6 +640,10 @@ Rules the AI agent must never violate:
 - Company research always returns a dossier — even if browser research fails, GPT-4o synthesizes from company name and job description alone. Never return empty.
 - Browserbase sessions are always closed with stagehand.close() when done — never leave sessions open.
 - Always scope InsForge queries to the current user_id — never query without a user filter.
+- Any user-supplied value interpolated into a PostgREST `or()` string is double-quoted first.
+  PostgREST parses that argument itself, so an unquoted comma, dot or parenthesis is read as syntax
+  and fails the whole request — this user's own data contains a company called
+  "SimVentions, Inc - Glassdoor ✪ 4.6".
 - Adzuna API always includes category=it-jobs — never search without this filter.
 - Every server-side PostHog event goes through `captureServerEvent` — never `new PostHog(...)` at a call site.
 - Every `captureServerEvent` call is wrapped in `after()` — never awaited on the request path.

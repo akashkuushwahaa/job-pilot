@@ -5,7 +5,17 @@ import type { JobListItem } from "@/types";
 
 type Props = {
   jobs: JobListItem[];
+  filtered: boolean;
 };
+
+const NO_JOBS =
+  "No jobs yet. Search a job title and location above to discover roles scored against your profile.";
+
+// An empty list means two different things and they need different sentences.
+// Telling someone who has fifty saved jobs to go and search would be telling
+// them the wrong thing about their own data.
+const NO_MATCHES =
+  "No jobs match these filters. Widen the match range or clear the text filter above to see the rest.";
 
 const headCell =
   "px-6 py-4 text-xs font-medium tracking-wider text-text-secondary uppercase";
@@ -13,7 +23,7 @@ const headCell =
 // Rows are not links yet — /find-jobs/[id] does not exist until feature 12, and
 // a row that navigates to a 404 is worse than one that does not navigate. The
 // hover state ui-rules.md specifies is kept, so only the href is missing.
-export function JobsTable({ jobs }: Props) {
+export function JobsTable({ jobs, filtered }: Props) {
   if (jobs.length === 0) {
     return (
       <div className="flex flex-col items-center px-6 py-16 text-center">
@@ -21,8 +31,7 @@ export function JobsTable({ jobs }: Props) {
           <SearchX aria-hidden className="size-5" />
         </span>
         <p className="mt-4 max-w-sm text-sm text-text-muted">
-          No jobs yet. Search a job title and location above to discover roles
-          scored against your profile.
+          {filtered ? NO_MATCHES : NO_JOBS}
         </p>
       </div>
     );

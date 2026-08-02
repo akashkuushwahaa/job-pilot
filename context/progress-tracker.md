@@ -6,15 +6,18 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 3 — Find Jobs Page, in progress
-**Last completed:** 10 Adzuna Job Discovery. The Find Jobs button is live: it opens an `agent_runs`
-record, searches Adzuna for IT jobs, scores every result against the saved profile with GPT-4o
-concurrently, upserts them onto the dedupe key, and reports "Found 8 jobs — 5 are strong matches".
-`mockJobs()` is gone — the table reads the user's own rows. First code in `agent/`, and the first
-writes to `agent_runs`, `jobs` and `agent_logs`. Verified live against Adzuna and GPT-4o through a
-temporary route; **the database round-trip has not run through the SDK yet** (see Notes).
-**Next:** 11 Filter + Sort + Pagination — wires the filter bar, both sorts and the pagination buttons
-to the read feature 10 already put on the page.
+**Phase:** Phase 3 — Find Jobs Page, complete
+**Last completed:** 11 Filter + Sort + Pagination. The filter bar, both sorts, the text filter and
+every pagination control are wired to the `jobs` read. All four live in the URL
+(`?q=&match=&sort=&page=`), so the read stays in the Server Component and a refresh, the back button
+and a shared link all reproduce the same list. **Not yet run in a browser** — see Feature 11 below
+for what was verified and what was not.
+**Open defect, carried:** searching a country the app does not support returns confidently wrong
+results rather than nothing — "India" was scored as Indianapolis. Details in Notes. It was flagged
+"fix before feature 11" and was not fixed; feature 11 does not depend on it, but it is now the
+oldest open item and a second run has since added ten more US rows.
+**Next:** 12 Job Details Page — Full UI. It also adds the `href` the table rows have been waiting
+for since feature 09.
 
 ---
 
@@ -38,7 +41,7 @@ to the read feature 10 already put on the page.
 
 - [x] 09 Find Jobs Page — Full UI
 - [x] 10 Adzuna Job Discovery
-- [ ] 11 Filter + Sort + Pagination
+- [x] 11 Filter + Sort + Pagination
 
 ### Phase 4 — Job Details Page
 
@@ -284,8 +287,13 @@ Designed through `/architect`; the five decisions below were made with the devel
 - **`jobs.external_id` added; it is the dedupe key.** Nothing previously stopped a re-run of the same
   search from duplicating every row and inflating feature 15's "Total Jobs Found". Keyed on Adzuna's
   stable `id` rather than `redirect_url`, because a tracking URL may carry a per-request token and
-  the constraint would then silently never fire. The index is partial so url-sourced jobs (no Adzuna
-  id) are not collapsed onto one NULL row per user.
+  the constraint would then silently never fire. ~~The index is partial so url-sourced jobs (no
+  Adzuna id) are not collapsed onto one NULL row per user.~~
+  > **Overturned by feature 10.** The predicate was doing nothing — unique indexes are
+  > `NULLS DISTINCT` by default, so NULL `external_id` rows never collided with each other either
+  > way — and it made the index unusable from PostgREST, which cannot emit the `WHERE` clause that
+  > `ON CONFLICT` needs to infer a partial index. Migration
+  > `20260802124740_jobs-dedupe-index-non-partial.sql` drops it. **Do not make it partial again.**
 - **Completeness is derived, not stored, and `is_complete` was dropped.** Feature 06 said percentage
   and missing fields were "calculated and saved", but no columns existed for them. Storing them
   means a backfill migration every time the definition of "complete" changes, and stale rows until
@@ -717,35 +725,149 @@ named "Java", "open-source" and "AI security", none of which are. Country detect
 `tsc`, lint and build clean, every route `ƒ`, `/api/agent/find` registered, and anonymous
 `POST /api/agent/find` 307s to `/login`.
 
+**Browser pass, 2026-08-02 — the whole path ran for real.** One search, "Backend Developer" in
+"India", read back from the live database afterwards. Everything the temporary route could not reach
+is now exercised:
+
+- **`agent_runs` opened and closed correctly.** One row, `status: completed`, `jobs_found: 10`,
+  `started_at` 07:33:50.195 → `completed_at` 07:33:54.957. **4.8 seconds end to end** for an Adzuna
+  call plus ten GPT-4o scores — Adzuna took 1.85s and the ten concurrent scores plus the upsert took
+  the remaining 2.9s. Sequential scoring would have been 30-40s, so the `Promise.allSettled` decision
+  paid for itself on the first run.
+- **The upsert worked through the SDK**, which the raw-SQL check could not prove. All ten rows carry
+  `source: 'search'`, a non-null `external_id` and a `run_id`.
+- **The scope decision held in practice.** `about_role` is exactly 500 characters on all ten;
+  `responsibilities`, `requirements`, `nice_to_have` and `benefits` are empty on all ten; no row has
+  a `company_research` dossier.
+- **`agent_logs` took both levels** — one `info` ("Adzuna returned 10 us listings") and one
+  `success` ("Saved 10 jobs"). **No `warning` rows, so no score failed** and the skip-and-log path is
+  still untested.
+- **`matched_skills` held.** Every row carries 1-4 matched skills and 1-6 missing, and scores spread
+  30-65 for a frontend profile against backend roles — which is the correct answer, not a flat one.
+- **`job_type` is null on all ten**, because no US listing in this result set carried `contract_time`
+  or `contract_type`. The "never default to fulltime" decision is what kept that honest.
+
+**The run also exposed a defect — see Notes.** The search said "India" and returned Indianapolis.
+
+### Feature 11 — Filter + Sort + Pagination
+
+No new components and almost no new markup: feature 09 wrote the option values as the filter and
+sort keys precisely so this feature would only add behaviour.
+
+Decisions:
+
+- **All four controls live in the URL, not in component state.** `?q=&match=&sort=&page=`, parsed by
+  `parseJobQuery` and read by `fetchJobPage`, both in `lib/jobs.ts`. This keeps the read in the
+  Server Component that renders the page — `code-standards.md` forbids fetching in a Client
+  Component — and it makes a refresh, the back button and a shared link all reproduce the same list.
+  The alternative, holding filter state in `JobFilters` and fetching from the client, would have put
+  a second copy of the query in the browser for the server's copy to drift from.
+- **Every sort ends with `id`, and it is not decoration.** `found_at` defaults to `now()`, which is
+  *transaction* time: **all ten rows of one discovery run carry the same millisecond** — confirmed
+  against the live table, two runs, two timestamps, ten rows each. `match_score` ties are just as
+  common (4 rows at 40, 3 at 30 in the first run). Sorting on either column alone is not a total
+  order, so Postgres may break ties differently per request and a paged read shows one row on two
+  pages and another on none.
+- **Filter text is double-quoted before it reaches PostgREST's `or()`.** PostgREST parses that
+  argument itself, so an unquoted comma, dot or parenthesis is read as syntax and fails the entire
+  request — and the page treats a read failure as fatal, so it would have been a blank page rather
+  than a bad result. This is not hypothetical: this user's own rows include a company called
+  **"SimVentions, Inc - Glassdoor ✪ 4.6"**, so typing its name would have taken the page down.
+- **The default sort is Match Score**, which is what the select has displayed since feature 09.
+  Feature 10's plain read was newest-first, so the visible ordering changes with this feature. A
+  default the control does not show is a control that lies on first load.
+- **A `?page=` past the end is clamped, not rendered empty.** One extra round trip in a rare case,
+  and only when the first read came back empty against a non-zero total. The resolved page — not the
+  requested one — is what the controls are given, so the URL and the rows cannot disagree.
+- **The empty state has two sentences now.** "No jobs yet, go and search" is the wrong thing to tell
+  someone whose jobs a filter is hiding, so `JobsTable` takes `filtered` and swaps the copy. No CTA:
+  the filter bar is directly above it and is itself the way out.
+- **The two selects are controlled; the text input is not.** A controlled `<select>` re-renders in
+  place and stays in step with the URL for free. The text input keeps `defaultValue` and is never
+  re-seeded — its 300ms debounced `replace` lands while the user is still typing, so a value fed back
+  from the server would race the keyboard and drop characters.
+- **Filters `replace`, pagination `push`es.** A history entry per keystroke turns the back button
+  into a way to un-type; moving between pages is a step a user does expect to walk back.
+- **`pageSize` stopped being a prop.** `JobsPagination` imports `JOBS_PAGE_SIZE` from `lib/jobs.ts`,
+  the same constant the read pages on — a passed page size can disagree with the one the query used.
+- **No new PostHog event.** Still seven.
+
+Found while building:
+
+- **A `PostgrestError` logs as `{}`.** `console.error("[lib/jobs] …", error)` rendered as literally
+  `{}` in `.next/dev/logs/next-development.log`, so a read failure told whoever read the log nothing
+  at all — despite the object carrying `code`, `details`, `hint` and `message`. The call site now
+  logs `error.code` and `error.message` by name. Worth remembering before trusting any log line that
+  prints a whole SDK error object.
+- **The `jobs` table gained ten rows mid-session** — a second browser search at 07:50:29Z, a
+  different location, so it inserted rather than deduped. The re-run/dedupe test is *still* not done.
+
+**Verified by execution:** a temporary route (since deleted, confirmed 404).
+
+- `parseJobQuery` over eight inputs: empty params → all defaults; `"  Stripe  "` trimmed; unknown
+  `match`/`sort` values fell back to `all`/`score` rather than reaching PostgREST; `page` of `0`,
+  `-4` and `abc` all became 1, `"2.7"` became 2; a repeated `?q=` took the first value; a 140-char
+  filter was cut to 100.
+- `jobsHref` round trip: all-defaults → bare `/find-jobs`, page-only → `?page=4`, everything set →
+  `?q=acme+corp&match=low&sort=newest&page=2`, and `a&b=c?d#e` → `?q=a%26b%3Dc%3Fd%23e`.
+- **The `or()` quoting, with a negative control.** Six filter strings — plain, `Smith, Jones`,
+  `say "hi"`, `back\slash`, `a.b(c)` and `or(1.eq.1)` — every one reached PostgREST and came back
+  `42501 permission denied` (the anonymous caller's expected refusal), which means the filter
+  *parsed*. The same text sent **unquoted** came back `PGRST100 failed to parse logic tree`. So the
+  test discriminates, and the quoting is what makes the difference.
+- **SQL semantics against the live 20 rows:** `ILIKE '%oracle%'` and `ILIKE '%ORACLE%'` both match 7
+  — case-insensitivity on a pattern that matches a subset, not everything; the comma-bearing company
+  name matches 10; `match_score >= 70` is 0 rows and `< 70` is 20, so High Match currently renders
+  the filtered empty state and Low Match renders everything.
+- `npx tsc --noEmit`, `npm run lint` and `npm run build` all clean, every route still `ƒ`.
+
+**Not verified — nothing here has rendered for a signed-in user.** The whole feature is unexercised
+in a browser: every control, the debounce, the clamp, both empty states, and `Link` navigation
+between pages. **Pagination cannot be exercised by the current data at all** — 20 rows at 20 per page
+is exactly one page, so the buttons are all in their disabled/single-page state until a 21st row
+exists.
+
 ---
 
 ## Notes
 
 _Add notes here as the build progresses — workarounds, patterns, anything that differs from the context files._
 
-- **Feature 10's database round-trip has not run through the SDK.** The `ON CONFLICT` semantics were
-  proven with raw SQL through MCP — including that `company_research` and `found_at` survive an
-  upsert — but no `discoverJobs()` call has yet reached Postgres through `@insforge/sdk`, because
-  every write is scoped by RLS to a real signed-in session and there is no way to hold one
-  headlessly. Unexercised: the `agent_runs` open/close lifecycle, the upsert itself, `agent_logs`
-  rows, and the `defaultToNull: false` flag. **This is the first thing to check in a browser.**
-- **Feature 10's UI has not been clicked.** Unexercised: the disabled state and its reason, the
-  in-flight line, both banner variants, Enter-to-submit, and `router.refresh()` bringing the new rows
-  onto the table. `job_found` also needs PostHog's Activity view — it goes through `posthog-node` and
-  never appears in the browser log.
-- **Re-running the same search is the test that matters.** Row count must not change, `found_at` must
-  not move, `run_id` must move to the new run, and a `company_research` value set by hand must
-  survive. That is the entire dedupe design and it has never run through the real client.
-
-- **Feature 09 is UI only and every control is inert.** The Find Jobs button has no handler
-  (feature 10), and the filter input, both selects and every pagination button are uncontrolled or
-  do nothing (feature 11). The success banner is a hardcoded string, not the result of a run. The
-  six rows come from `mockJobs()` in `app/find-jobs/page.tsx` — delete it in feature 11 and replace
-  it with a read scoped to `user_id`, the same way `mockProfile()` was deleted in feature 06.
-- **Feature 09 has not run in a browser.** Unexercised: the horizontal scroll under 720px, the
-  responsive stacking of the search row and the filter bar, the row hover, select focus rings, and
-  how the table reads on a phone. `/find-jobs` is also the one protected page a signed-in user has
-  never seen anything real on.
+- **OPEN DEFECT — an unsupported country returns confidently wrong results.** The first real search
+  was "Backend Developer" in **India** and it saved ten jobs in **Indianapolis**. `detectCountry`
+  only knows `us` / `gb` / `au` / `ca`, so "India" fell through to the `us` default, and Adzuna's
+  `where=India` then fuzzy-matched Indiana. This is worse than the failure mode the design guarded
+  against: the plan reasoned that a wrong country "silently returns nothing", but it can also return
+  a full page of plausible, wrong-continent results that the user has no way to identify as wrong.
+  Two things to weigh — **add `in` (and the other Adzuna markets) to `ADZUNA_COUNTRIES`**, and
+  **surface the market that was actually searched** in the result banner, since the `agent_logs` row
+  already records it ("Adzuna returned 10 **us** listings"). ~~Fix before feature 11.~~ **Not fixed;
+  feature 11 shipped without it.** Feature 11 does not depend on it — filtering and sorting do not
+  care where a row came from — but this is now the oldest open item, and a second search has since
+  added ten more US rows on top of the ten Indianapolis ones.
+- **Feature 10's re-run behaviour is still unverified.** Two runs have now happened, but they were
+  different searches — the second returned Virginia listings, so it inserted ten new rows rather than
+  refreshing the first ten. The dedupe path has still never executed. Row count
+  must not change on a repeat, `found_at` must not move, `run_id` must move to the new run, and a
+  `company_research` value set by hand must survive. That is the entire dedupe design, and the one
+  part of feature 10 the browser pass did not reach.
+- **Feature 10 — still unexercised after the browser pass:** the completeness gate and its muted
+  reason (the profile was already complete when the run happened), the error banner, the zero-result
+  sentence, Enter-to-submit, and the skip-and-log path for a failed score, which needs a scoring
+  failure that has not occurred yet. `job_found` fired ten times but has never been confirmed
+  arriving — it goes through `posthog-node` and never appears in the browser log, so it needs
+  PostHog's Activity view.
+- **Historical, features 09–10 only — every control on the page is wired now.** Feature 09 shipped
+  the filter input, both selects and the pagination buttons inert; feature 10 wired Find Jobs and
+  deleted `mockJobs()`; feature 11 wired the remaining five. Nothing on `/find-jobs` is a placeholder
+  any more except the table row `href`, which lands with feature 12.
+- **Feature 11 has not run in a browser.** Every control, the 300ms debounce, the page clamp, both
+  empty-state sentences and `Link` navigation are unexercised. **Pagination cannot be exercised by
+  the current data** — 20 rows at 20 per page is exactly one page, so a 21st row is needed before
+  Previous/Next/page-numbers leave their single-page state.
+- **Feature 09's responsive behaviour has still not been looked at.** Unexercised: the horizontal
+  scroll under 720px, the responsive stacking of the search row and the filter bar, the row hover,
+  select focus rings, and how the table reads on a phone.
 
 - **Feature 08 has not run in a browser, and has never run against a real profile row.** Everything
   verified above went through a fixture in a temporary route. Unexercised: the confirm step, the two
@@ -755,14 +877,11 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
   carrying fewer roles than were sent.
 - **The first real click of Generate destroys the uploaded resume feature 07 extracts from.** One
   key, one resume, no undo. Re-upload a copy afterwards if the original is worth keeping.
-- **Feature 05 is UI only, and three controls are deliberately inert.** "Save Profile" submits a form
-  whose `onSubmit` calls `preventDefault` (feature 06), "Generate Resume from Profile" has no handler
-  (feature 08), and a selected resume file is held in component state and never uploaded (feature 06).
-  The completion ring reads the *saved* profile, not live form state, so it will not move while
-  typing — feature 06 recomputes it after `revalidatePath`.
-- **`app/profile/page.tsx` holds a `mockProfile()` function.** Delete it in feature 06 and replace it
-  with a real read; it returns exactly the design's data so the page can be diffed against
-  `context/designs/profile.png`. Email is already real — it comes from `requireUser()`.
+- **Historical, feature 05 only — all three are wired now.** As delivered, feature 05 shipped "Save
+  Profile" with an `onSubmit` that called `preventDefault`, "Generate Resume from Profile" with no
+  handler, and a resume file held in state and never uploaded. Features 06 and 08 wired all three;
+  `mockProfile()` was deleted in feature 06. The one behaviour that survives: the completion ring
+  reads the *saved* profile, not live form state, so it does not move while typing.
 - **Verified for feature 05:** `npx tsc --noEmit`, `npm run lint` and `npm run build` all clean;
   every route still `ƒ`. `/profile` still 307s to `/login` while signed out. The rendered markup was
   checked through a temporary unauthenticated preview route (since deleted): 70% ring with the three
@@ -796,7 +915,10 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
   `42501 permission denied` over the real REST API on all four tables; the private bucket returns 403
   on list and 401 on direct fetch; the unique index rejects a duplicate `external_id`; an upsert
   refreshed `match_score` 50 → 91 while preserving `company_research`; two NULL-`external_id` rows
-  coexist. All test rows were deleted — every table is empty.
+  coexist. (The last three were re-verified in feature 10 against the **non-partial** index.)
+  **The tables are no longer empty** — as of feature 11 they hold 1 profile, **2** `agent_runs` rows
+  and **20** jobs, all belonging to the single existing user. Two discovery runs, ten rows each,
+  neither of them a repeat of the other.
   **Not verified: that user A cannot read user B's rows.** That is the one property RLS exists for,
   and it needs a real user JWT. Both MCP `run-raw-sql` and CLI `db query` run as `project_admin` and
   refuse `SET ROLE`, so neither can prove it. There is currently only one user in `auth.users`.

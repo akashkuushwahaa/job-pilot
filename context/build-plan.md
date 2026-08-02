@@ -257,6 +257,21 @@ Wire filter tabs, sort dropdown, text search, and pagination to real InsForge DB
 - Text search — filter by company name or job title (case insensitive)
 - Pagination — 20 jobs per page, total count shown
 
+> Corrected against the delivered feature 11.
+> **All four controls live in the URL**, not in component state — `?q=&match=&sort=&page=`. The read
+> stays in the Server Component that renders the page, and a refresh, the back button and a shared
+> link all reproduce the same list. `lib/jobs.ts` owns parsing, link building and the read.
+> **The default sort is Match Score**, which is what the select has read since feature 09. Feature
+> 10's plain read was newest-first, so the visible ordering changes with this feature.
+> **Every sort ends with `id`.** `found_at` is transaction time, so all ten rows of one run share a
+> millisecond, and score ties are common — without a unique final key a paged read repeats rows.
+> **Three rules the plan does not state** were settled here: filter text is double-quoted before it
+> reaches PostgREST's `or()` (an unquoted comma fails the whole request, and this user's data has a
+> company named "SimVentions, Inc"); a `?page=` beyond the last page is clamped rather than rendered
+> as an empty list; and the empty state carries different copy when filters are active, because
+> "search for some jobs" is the wrong thing to say to someone whose jobs a filter is hiding.
+> `architecture.md` is authoritative.
+
 ---
 
 ## Phase 4 — Job Details Page
