@@ -122,6 +122,37 @@ export type JobListItem = {
   found_at: string;
 };
 
+// One whole job, as the details page renders it. Wider than JobListItem and
+// deliberately not a superset of the `jobs` table: `company_research` is absent
+// because feature 12 only draws the empty state, and `run_id` / `source` /
+// `external_id` are bookkeeping the page never shows.
+//
+// The five description fields are empty on every row discovered so far — Adzuna
+// returns a 500-character snippet, so feature 10 puts it in `about_role` verbatim
+// and writes nothing else. Rendering must therefore be per-section, never
+// assumed.
+export type JobDetail = {
+  id: string;
+  title: string;
+  company: string;
+  location: string | null;
+  salary: string | null;
+  job_type: string | null;
+  source_url: string | null;
+  external_apply_url: string | null;
+  about_role: string | null;
+  responsibilities: string[];
+  requirements: string[];
+  nice_to_have: string[];
+  benefits: string[];
+  about_company: string | null;
+  match_score: number;
+  match_reason: string | null;
+  matched_skills: string[];
+  missing_skills: string[];
+  found_at: string;
+};
+
 // The Find Jobs filter bar. Both the client component that renders the selects
 // and the server read that applies them work from these two lists, so an option
 // the query cannot honour cannot be rendered in the first place.

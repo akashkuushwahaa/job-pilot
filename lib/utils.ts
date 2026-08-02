@@ -21,6 +21,17 @@ export function matchScoreFill(score: number): string {
   return "bg-warning";
 }
 
+// A status badge, not a score bar, and the two answer different questions.
+// ui-tokens.md keys High Match / Low Match on MATCH_THRESHOLD, which is why the
+// job details header draws 85% green while matchScoreFill() paints an 85 bar
+// blue — the bar reports where in the range a score sits, the badge reports
+// whether it cleared the bar. Do not collapse these into one function.
+export function matchBadge(score: number): string {
+  return score >= MATCH_THRESHOLD
+    ? "bg-success-lightest text-success-foreground"
+    : "bg-surface-secondary text-text-secondary";
+}
+
 const relativeTime = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
 const absoluteDate = new Intl.DateTimeFormat("en", {
@@ -55,4 +66,20 @@ export function formatRelativeTime(iso: string): string {
   if (days < 30) return capitalise(relativeTime.format(-days, "day"));
 
   return absoluteDate.format(new Date(then));
+}
+
+// jobs.job_type stores the three values architecture.md names. It is null far
+// more often than not — lib/adzuna.ts refuses to default an unstated listing to
+// "fulltime" — so this returns null rather than a placeholder and the caller
+// decides what absence looks like.
+const JOB_TYPE_LABELS: Record<string, string> = {
+  fulltime: "Full-time",
+  parttime: "Part-time",
+  contract: "Contract",
+};
+
+export function formatJobType(value: string | null): string | null {
+  if (value === null || value.length === 0) return null;
+
+  return JOB_TYPE_LABELS[value] ?? capitalise(value);
 }
