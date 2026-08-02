@@ -5,6 +5,7 @@ import { MATCH_THRESHOLD } from "@/lib/utils";
 import {
   JOB_MATCH_FILTERS,
   JOB_SORTS,
+  type JobDetail,
   type JobListItem,
   type JobMatchFilter,
   type JobQuery,
@@ -16,6 +17,15 @@ export const JOBS_PAGE_SIZE = 20;
 const MAX_FILTER_TEXT = 100;
 
 const JOB_LIST_COLUMNS = "id, company, title, match_score, salary, found_at";
+
+// company_research is deliberately not selected: feature 12 renders the empty
+// state only and feature 13 is what writes a dossier. Selecting a column the
+// page cannot render invites a half-wired card.
+const JOB_DETAIL_COLUMNS =
+  "id, title, company, location, salary, job_type, source_url, external_apply_url, about_role, responsibilities, requirements, nice_to_have, benefits, about_company, match_score, match_reason, matched_skills, missing_skills, found_at";
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The same discipline as parseProfile in lib/profile.ts: PostgREST hands back
 // `any`, so annotating a row `JobListItem` renames the `any` and checks nothing.
@@ -198,4 +208,81 @@ export async function fetchJobPage(
   }
 
   return { jobs: first.jobs, total: first.total, page: query.page };
+}
+
+const nullableText = z
+  .string()
+  .nullish()
+  .transform((value) => value ?? null);
+
+// A text[] column reads back as null only if something wrote null into it, but
+// jsonb-style surprises are exactly what parseProfile was written for — an empty
+// list renders as "no section", which is the honest answer either way.
+const stringArray = z
+  .array(z.string())
+  .nullish()
+  .transform((value) => value ?? []);
+
+const JobDetailSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  company: z.string(),
+  location: nullableText,
+  salary: nullableText,
+  job_type: nullableText,
+  source_url: nullableText,
+  external_apply_url: nullableText,
+  about_role: nullableText,
+  responsibilities: stringArray,
+  requirements: stringArray,
+  nice_to_have: stringArray,
+  benefits: stringArray,
+  about_company: nullableText,
+  match_score: z.number(),
+  match_reason: nullableText,
+  matched_skills: stringArray,
+  missing_skills: stringArray,
+  found_at: z.string(),
+});
+
+// Null means "no such job for this user" and the page turns that into a 404.
+// A read failure and an unreadable row both throw, because neither is the same
+// statement: rendering "not found" over a job that plainly exists would send the
+// user back to a list still showing the row they just clicked.
+export async function fetchJob(
+  insforge: InsforgeServerClient,
+  userId: string,
+  jobId: string,
+): Promise<JobDetail | null> {
+  // PostgREST answers a malformed uuid with 22P02, which arrives as a read
+  // failure and would render the error boundary. A hand-typed /find-jobs/nope is
+  // a missing job, not a broken database.
+  if (!UUID_PATTERN.test(jobId)) {
+    return null;
+  }
+
+  const { data, error } = await insforge.database
+    .from("jobs")
+    .select(JOB_DETAIL_COLUMNS)
+    .eq("user_id", userId)
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[lib/jobs] job read failed", error.code, error.message);
+    throw new Error("Job unavailable");
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const parsed = JobDetailSchema.safeParse(data);
+
+  if (!parsed.success) {
+    console.error("[lib/jobs] unreadable job row", parsed.error.issues);
+    throw new Error("Job unavailable");
+  }
+
+  return parsed.data;
 }
