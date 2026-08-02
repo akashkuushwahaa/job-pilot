@@ -29,7 +29,11 @@ export function MatchScore({ job }: Props) {
       {job.match_reason === null ? null : (
         <section className="rounded-xl border border-border bg-surface p-6 shadow-sm">
           <div className="flex items-center gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-success-lightest text-success">
+            {/* text-success-foreground, not text-success: #10B981 on
+                #ECFDF5 is 2.4:1, under the 3:1 floor for a graphical object.
+                ui-tokens.md's own rule — the fill colour is not the colour that
+                goes on top of it. #007A55 measures 5.4:1 on the same tint. */}
+            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-success-lightest text-success-foreground">
               <Sparkles aria-hidden className="size-4" />
             </span>
             <h2 className={eyebrow}>AI Match Reasoning</h2>
@@ -72,7 +76,10 @@ export function MatchScore({ job }: Props) {
                 {job.missing_skills.map((skill) => (
                   <li
                     key={skill}
-                    className={cn(skillChip, "bg-accent-muted text-accent")}
+                    className={cn(
+                      skillChip,
+                      "bg-accent-muted text-accent-dark",
+                    )}
                   >
                     <X aria-hidden className="size-3.5" />
                     {skill}

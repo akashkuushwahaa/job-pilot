@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { InsforgeServerClient } from "@/lib/insforge-server";
-import { MATCH_THRESHOLD } from "@/lib/utils";
+import { MATCH_THRESHOLD, safeExternalUrl } from "@/lib/utils";
 import {
   JOB_MATCH_FILTERS,
   JOB_SORTS,
@@ -80,6 +80,21 @@ export function discoveryMessage(scores: number[]): string {
   const matches = strong === 1 ? "1 is a strong match" : `${strong} are strong matches`;
 
   return `Found ${jobs} — ${matches}.`;
+}
+
+// Adzuna's search endpoint returns a 500-character snippet that stops mid-word
+// and ends with a single ellipsis character. Verified twice: all ten live results
+// in feature 10, and all 20 stored rows — every one exactly 500 characters, every
+// one ending in this character.
+//
+// The details page keys its "the rest is elsewhere" note on the ellipsis rather
+// than on the length, because 500 is Adzuna's number to change and a description
+// that arrives whole must not carry the note. Until something fetches the real
+// posting body, this is the only signal that the text is partial.
+const SNIPPET_ELLIPSIS = "…";
+
+export function isTruncatedDescription(text: string | null): boolean {
+  return text !== null && text.endsWith(SNIPPET_ELLIPSIS);
 }
 
 // Narrowing without a type assertion: `find` compares the untrusted string
@@ -223,6 +238,13 @@ const stringArray = z
   .nullish()
   .transform((value) => value ?? []);
 
+// Scheme-checked at the boundary rather than at each href, so JobDetail carries
+// only URLs the page is allowed to link to and no consumer has to remember.
+const externalUrl = z
+  .string()
+  .nullish()
+  .transform((value) => safeExternalUrl(value ?? null));
+
 const JobDetailSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -230,8 +252,8 @@ const JobDetailSchema = z.object({
   location: nullableText,
   salary: nullableText,
   job_type: nullableText,
-  source_url: nullableText,
-  external_apply_url: nullableText,
+  source_url: externalUrl,
+  external_apply_url: externalUrl,
   about_role: nullableText,
   responsibilities: stringArray,
   requirements: stringArray,

@@ -74,8 +74,14 @@ export function JobsTable({ jobs, filtered }: Props) {
                   <span className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-surface-secondary text-text-secondary">
                     <Building2 aria-hidden className="size-4" />
                   </span>
+                  {/* prefetch={false}: this page renders up to twenty rows, and
+                      /find-jobs/[id] is a protected dynamic route, so a default
+                      prefetch means twenty auth checks and twenty job reads
+                      fired by scrolling. The route's loading.tsx is what keeps
+                      the click feeling immediate without them. */}
                   <Link
                     href={`/find-jobs/${job.id}`}
+                    prefetch={false}
                     className="text-sm font-semibold text-text-primary before:absolute before:inset-0 before:content-[''] focus-visible:outline-none focus-visible:before:ring-1 focus-visible:before:ring-accent focus-visible:before:ring-inset"
                   >
                     {job.company}

@@ -21,6 +21,35 @@ export function matchScoreFill(score: number): string {
   return "bg-warning";
 }
 
+// jobs.source_url and jobs.external_apply_url come from Adzuna, and lib/adzuna.ts
+// validates redirect_url as a non-empty string and nothing more — so the only
+// thing standing between a third party payload and an href on our page is this.
+// A `javascript:` or `data:` scheme in a link is an XSS vector; React blocks the
+// obvious case, but the project's own rule is that a third party payload is
+// untrusted input, and this is where it becomes clickable.
+//
+// Returning null is the handling, not a swallowed failure: a URL we cannot vouch
+// for is one the page must not offer as a link at all.
+export function safeExternalUrl(value: string | null): string | null {
+  if (value === null || value.length === 0) return null;
+
+  let parsed: URL;
+
+  try {
+    parsed = new URL(value);
+  } catch {
+    console.error("[lib/utils] discarded an unparseable job URL");
+    return null;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    console.error("[lib/utils] discarded a job URL scheme", parsed.protocol);
+    return null;
+  }
+
+  return value;
+}
+
 // A status badge, not a score bar, and the two answer different questions.
 // ui-tokens.md keys High Match / Low Match on MATCH_THRESHOLD, which is why the
 // job details header draws 85% green while matchScoreFill() paints an 85 bar
