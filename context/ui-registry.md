@@ -793,7 +793,7 @@ mt-4 flex items-center gap-2 rounded-lg border px-4 py-3 text-sm
 ### JobFilters — `components/find-jobs/JobFilters.tsx`
 
 File: `components/find-jobs/JobFilters.tsx`
-Last updated: 2026-08-02
+Last updated: 2026-08-02 (feature 11)
 
 | Property         | Class                                                     |
 | ---------------- | --------------------------------------------------------- |
@@ -817,6 +817,22 @@ then a divider, then the two selects.
 - **Select as a button.** `Select className="w-auto font-medium"` — `w-auto` beats `fieldSurface`'s
   `w-full` through twMerge, and the heavier weight is what makes it read as a control rather than a
   field. Both selects are labelled with `aria-label`; the design draws no visible label.
+
+**Feature 11 — a Client Component, and the markup did not change.** Feature 09 wrote the option
+values as the filter and sort keys, so wiring it added handlers and nothing else.
+
+- **The URL is the state.** It takes one `query: JobQuery` prop and writes back through
+  `router.replace(jobsHref(...))`. Nothing is held in component state, so the server read and the
+  controls cannot disagree. Reach for this on any control that changes what a Server Component reads.
+- **`replace`, not `push`.** A filter bar that stacks a history entry per keystroke turns the back
+  button into a way to un-type. Pagination is the opposite and pushes — see `JobsPagination`.
+- **The two selects are controlled; the text input is not.** A controlled `<select>` re-renders in
+  place, so it stays in step with the URL at no cost. The text input is `defaultValue` and is never
+  re-seeded: its 300ms debounced `replace` lands while the user is still typing, so a value fed back
+  from the server would race the keyboard and drop characters. This split is deliberate — do not
+  "fix" the input into a controlled one.
+- **Every change resets `page` to 1.** A filter that narrows the list to two pages while the URL says
+  `page=5` would otherwise land on nothing.
 
 ### JobsTable — `components/find-jobs/JobsTable.tsx`
 
@@ -855,6 +871,12 @@ icon:    grid size-12 place-items-center rounded-full border border-border bg-su
 copy:    mt-4 max-w-sm text-sm text-text-muted
 ```
 
+**Feature 11 — one empty state, two sentences.** The recipe is unchanged; a `filtered` prop picks
+the copy. "No jobs yet, go and search" is the wrong thing to tell someone who has fifty saved jobs
+and a filter that excludes them all, so the filtered variant points at the filter bar instead. Still
+no CTA — the bar is directly above and is itself the way out. **Any list that can be empty for two
+different reasons needs two sentences**, not one that is true half the time.
+
 ### JobsPagination — `components/find-jobs/JobsPagination.tsx`
 
 File: `components/find-jobs/JobsPagination.tsx`
@@ -869,14 +891,27 @@ Last updated: 2026-08-02
 | Accent usage     | current page — `border-accent/30 bg-accent-muted text-accent hover:bg-accent-light` |
 
 **Pattern notes:**
-Takes `page` / `pageSize` / `totalResults` and derives the page count itself, so the count sentence
-and the page buttons cannot disagree. Page buttons are `Button variant="secondary"` squared off with
-`w-9 px-0`; the current one is that same button re-coloured and carries `aria-current="page"`.
-Every button also carries `aria-label="Page N"` — a bare numeral is not a label.
+Takes `query: JobQuery` / `totalResults` and derives the page count itself, so the count sentence
+and the page buttons cannot disagree. Page buttons are squared off with `w-9 px-0`; the current one
+is that same button re-coloured and carries `aria-current="page"`. Every one also carries
+`aria-label="Page N"` — a bare numeral is not a label.
 
 Page numbers are first, last, and a three-wide window: `1 2 3 … 8` at page 1, `1 … 4 5 6 … 8` at
 page 5, `1 … 5 6 7 8` at page 8, and no ellipsis at all under six pages. Previous is disabled on
 the first page and Next on the last, which is a real state rather than missing logic.
+
+**Feature 11 — link or disabled button, decided per control.** The module-local `PageControl` takes
+`href: string | null` and is the registry's rule made mechanical: a control that navigates is a
+`Link` carrying `buttonVariants({ variant: "secondary" })`; a control with nowhere to go is a
+disabled `Button`. Previous on page one has no href because there is no such page, and an `<a>`
+cannot express that. Reuse this shape wherever navigation and a disabled state coexist.
+
+- **`pageSize` is no longer a prop.** It imports `JOBS_PAGE_SIZE` from `lib/jobs.ts`, the same
+  constant the read pages on. A page size passed in can disagree with the one the query used; a
+  shared constant cannot.
+- **Every href carries the whole query**, built by `jobsHref`, so paging never silently drops the
+  filter that produced the list. These are the page's only `push` navigations — moving between pages
+  is a step a user expects the back button to walk.
 
 ### Find Jobs page — `app/find-jobs/page.tsx`
 
@@ -888,9 +923,15 @@ credit at `text-xs text-text-muted`.
 Unlike `/profile`, this page uses the full 1440px container: a table is scanned across, not read
 down a column.
 
-**Nothing on this page is a Client Component.** Every control is uncontrolled or inert, so feature
-09 ships no JavaScript of its own. Features 10 and 11 add the client boundaries where they are
-actually needed.
+**Two Client Components, and only two.** Feature 09 shipped none; feature 10 made `SearchControls`
+one and feature 11 made `JobFilters` one. `JobsTable` and `JobsPagination` stayed on the server —
+pagination navigates with `Link`, so it needs no JavaScript to work.
+
+**The page owns the query, the components render it.** `parseJobQuery(await searchParams)` normalises
+the URL, `fetchJobPage` reads against it, and the resolved page number is folded back into one
+`listQuery` object that `JobFilters` and `JobsPagination` both take. Passing the *resolved* page —
+not the requested one — is what keeps a clamped `?page=99` from showing controls that disagree with
+the rows underneath them.
 
 ### Profile page — `app/profile/page.tsx`
 
