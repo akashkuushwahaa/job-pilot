@@ -61,10 +61,10 @@
 │       │   ├── generate/route.ts          → Generate base resume PDF from profile
 │       │   └── extract/route.ts           → Extract profile data from uploaded resume PDF
 ├── agent/
-│   ├── adzuna.ts                          → Adzuna API job discovery + GPT-4o scoring
+│   ├── adzuna.ts                          → Discovery run: search, score, upsert, close the run
 │   ├── research.ts                        → Company research — Browserbase + Stagehand + GPT-4o
-│   ├── matcher.ts                         → GPT-4o job matching logic
-│   ├── extractor.ts                       → GPT-4o job description extraction + structuring
+│   ├── matcher.ts                         → GPT-4o scoring of one job against one profile
+│   ├── logs.ts                            → The only writer of agent_logs; never throws
 │   └── types.ts                           → Agent-specific TypeScript types
 ├── actions/
 │   ├── auth.ts                            → OAuth initiation + sign out
@@ -126,6 +126,7 @@
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
 │   ├── profile.ts                         → parseProfile + both directions of the row <-> form mapping
+│   ├── jobs.ts                            → parseJobList + the discovery banner sentence
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -352,15 +353,28 @@ Three columns from earlier drafts do not exist and must not be re-added:
 | company_research   | jsonb       | Company dossier from research agent            |
 | found_at           | timestamptz |                                                |
 
-**Re-running a search must not duplicate rows.** A unique partial index
-`(user_id, source, external_id) WHERE external_id IS NOT NULL` is the dedupe key; feature 10 upserts
-onto it. It is partial so that url-sourced jobs, which have no Adzuna id, are not all collapsed onto
-one NULL row per user.
+**Re-running a search must not duplicate rows.** The unique index
+`(user_id, source, external_id)` is the dedupe key; feature 10 upserts onto it.
 
-**The upsert must never include `company_research` in its update list.** Re-discovery refreshes
-title, salary, `match_score`, `match_reason` and the skill arrays — writing the whole record back
-would wipe a dossier the user already spent a Browserbase session generating. Verified against the
-live database: after an upsert, `match_score` refreshed 50 → 91 and `company_research` survived.
+**The index is not partial, and must not be made partial again.** Feature 04 created it with
+`WHERE external_id IS NOT NULL`, reasoning that url-sourced jobs would otherwise collapse onto one
+NULL row per user. That reasoning was wrong — PostgreSQL unique indexes are `NULLS DISTINCT` by
+default, so NULL `external_id` rows never collide with each other either way. The predicate bought
+nothing and cost the feature: PostgreSQL infers a partial index for `ON CONFLICT` only when the
+statement repeats the predicate, and PostgREST's `on_conflict` parameter emits no `WHERE`, so every
+upsert failed with *"there is no unique or exclusion constraint matching the ON CONFLICT
+specification"*. Migration `20260802124740_jobs-dedupe-index-non-partial.sql` drops it.
+
+**The upsert must never include `company_research` or `found_at` in its payload.** PostgREST builds
+its `ON CONFLICT DO UPDATE SET` list from the payload's own keys, so omitting a column is the only
+way to say "write this once and never touch it again". Re-discovery refreshes title, salary,
+`match_score`, `match_reason` and the skill arrays; a dossier the user spent a Browserbase session on
+survives, and `found_at` keeps meaning *first discovered*, which is what the Date Found column
+claims. `run_id` **is** sent, so it moves to whichever run most recently surfaced the job.
+
+Verified against the live database in feature 10: the predicate-free statement upserts, `match_score`
+refreshed 50 → 91, `company_research` and `found_at` were untouched, and two NULL-`external_id` rows
+coexisted under the non-partial index.
 
 No tailored-resume columns exist. Resume tailoring is out of scope.
 
@@ -607,6 +621,13 @@ Rules the AI agent must never violate:
 - GPT-4o writes prose only. Any fact that appears in a generated document is rendered from the row.
 - Agent code in `/agent` never imports from `/components` or `/actions`.
 - Server Actions never call agent functions. Agent functions are only called from API routes.
+- Agent functions take the InsForge client as a parameter — they never call `createInsforgeServer()`
+  themselves. One run makes several writes and they all belong to the same request.
+- Job discovery writes no job facts it did not receive. Adzuna's snippet goes into `about_role`
+  verbatim; `responsibilities`, `requirements`, `nice_to_have`, `benefits` and `about_company` stay
+  empty rather than being reconstructed from a description that truncates mid-sentence.
+- `matched_skills` is always filtered back down to skills the profile actually lists. It is rendered
+  as the candidate's own claim, so the model's answer is checked against the row rather than trusted.
 - All InsForge server-side writes use `createInsforgeServer()` — never the browser client.
 - No hardcoded hex values or raw Tailwind color classes in components — use CSS variables from ui-tokens.md.
 - Every Stagehand action is wrapped in try/catch. Failures are logged to agent_logs, never thrown to crash the run.
