@@ -9,7 +9,13 @@ import {
 } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
-import { cn, formatJobType, formatRelativeTime, matchBadge } from "@/lib/utils";
+import {
+  cn,
+  formatJobType,
+  formatRelativeTime,
+  matchBadge,
+  matchScoreFill,
+} from "@/lib/utils";
 import type { JobDetail } from "@/types";
 
 type Props = {
@@ -90,6 +96,25 @@ export function JobInfo({ job }: Props) {
                   {job.match_score}% Match Score
                 </span>
               </div>
+
+              {/* project-overview.md asks the match section for a score number
+                  *and* a visual indicator; the design draws only the badge. The
+                  bar is the reading of the two that satisfies both, and it reuses
+                  feature 09's matchScoreFill so this page and the jobs table can
+                  never colour the same score differently. aria-hidden because the
+                  percentage is directly above it — one reading, not two. */}
+              <span
+                aria-hidden
+                className="mt-3 block h-1.5 w-full max-w-56 overflow-hidden rounded-full bg-border-light"
+              >
+                <span
+                  className={cn(
+                    "block h-full rounded-full",
+                    matchScoreFill(job.match_score),
+                  )}
+                  style={{ width: `${job.match_score}%` }}
+                />
+              </span>
             </div>
           </div>
 

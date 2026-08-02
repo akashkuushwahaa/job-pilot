@@ -180,7 +180,17 @@ This mirrors the green pair already in the token set: `--color-success` fills, `
 | Type          | Background            | Text                      |
 | ------------- | --------------------- | ------------------------- |
 | Matched skill | `bg-success-lightest` | `text-success-foreground` |
-| Missing skill | `bg-accent-muted`     | `text-accent`             |
+| Missing skill | `bg-accent-muted`     | `text-accent-dark`        |
+
+> Corrected in feature 12. This row said `text-accent`, which is #7C5CFC on #FAF5FF — **4.2:1**,
+> under the 4.5:1 AA floor for the 12px text these chips use. `--color-accent-dark` (#5E4CFF)
+> measures **5.0:1** on the same tint and needed no new token. Same failure and same fix as the two
+> already recorded here: `--color-error` → `--color-error-dark`, and `--color-success` →
+> `--color-success-foreground`. **A fill colour is not the colour that goes on top of it.**
+>
+> `components/homepage/DossierPreview.tsx` still pairs `text-accent` with `bg-accent-muted` on its
+> highlighted question. Same 4.2:1, at 14px. Left alone as out of feature 12's scope — fix it when
+> that component is next touched.
 
 ### Source Badges
 

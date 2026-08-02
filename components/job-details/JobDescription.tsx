@@ -1,5 +1,7 @@
-import { FileText } from "lucide-react";
+import { ExternalLink, FileText } from "lucide-react";
 
+import { buttonVariants } from "@/components/ui/button";
+import { isTruncatedDescription } from "@/lib/jobs";
 import type { JobDetail } from "@/types";
 
 type Props = {
@@ -83,6 +85,40 @@ export function JobDescription({ job }: Props) {
           </p>
         </div>
       )}
+
+      {/* The paragraph above stops mid-word on every job Adzuna has ever
+          returned, and an unexplained ellipsis under a heading that says "Job
+          Description" is indistinguishable from a broken renderer — it was
+          reported as one. Nothing here truncates: the note says who did, and the
+          link is the only place the rest of the text actually exists.
+
+          ResumeUpload's footer-row recipe, which the registry reserves for
+          exactly this ("here is an action related to this card"). */}
+      {isTruncatedDescription(job.about_role) ? (
+        <div className="mt-6 border-t border-border pt-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-text-secondary">
+              Adzuna returns only the first 500 characters of a listing. The rest
+              is on the original posting.
+            </p>
+
+            {job.source_url === null ? null : (
+              <a
+                href={job.source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={buttonVariants({
+                  variant: "secondary",
+                  className: "sm:shrink-0",
+                })}
+              >
+                <ExternalLink aria-hidden className="size-4" />
+                Read full description
+              </a>
+            )}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -441,6 +441,27 @@ Temperature: 0.4
 - Always return a dossier — never fail silently. If browser research failed, GPT-4o synthesizes from job description and profile alone.
   **PostHog event:** `company_researched` — { userId, jobId, company }
 
+> **Added in feature 12 — feature 13 also backfills the job description.**
+> `about_role` holds Adzuna's 500-character snippet, which stops mid-word on **every** job (verified:
+> 20 of 20 rows, all exactly 500 characters, all ending in `…`). That leaves
+> `project-overview.md`'s "Job details page displays clean structured job information" unmet for
+> every listing, and `responsibilities` / `requirements` / `nice_to_have` / `benefits` /
+> `about_company` permanently empty.
+>
+> Feature 13 is the feature that closes it, because it is **already specified to follow the Adzuna
+> redirect with `fetch(redirect_url, { redirect: "follow" })`** and land on the real employer job
+> page before the browser session even opens. Extract the posting body on that hop and write it back
+> to `about_role` and the four bullet columns. Building a second scraper for this would duplicate the
+> redirect-follow that is already in this feature's plan.
+>
+> Two rules carry over from feature 10 and are not negotiable: **write no field the page did not
+> actually state** — a section that is not in the posting stays empty rather than being synthesised —
+> and the upsert must still never touch `found_at` or `company_research`.
+>
+> Until then, feature 12 renders the snippet with a note naming Adzuna as the truncator and a link to
+> the original posting. **Delete that note in the same change that fills the column**, or it will
+> claim a truncation that no longer exists.
+
 ---
 
 ## Job Details UI — Company Research Card (Updated)
