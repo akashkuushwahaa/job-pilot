@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { parseDossier } from "@/lib/dossier";
 import type { InsforgeServerClient } from "@/lib/insforge-server";
 import { MATCH_THRESHOLD, safeExternalUrl } from "@/lib/utils";
 import {
@@ -18,11 +19,12 @@ const MAX_FILTER_TEXT = 100;
 
 const JOB_LIST_COLUMNS = "id, company, title, match_score, salary, found_at";
 
-// company_research is deliberately not selected: feature 12 renders the empty
-// state only and feature 13 is what writes a dossier. Selecting a column the
-// page cannot render invites a half-wired card.
+// company_research joined this select in feature 13, in the same change that
+// added the dossier markup and the Research Company button's handler. The three
+// move together on purpose: a card reporting "No research yet" over a dossier
+// that exists is worse than one that cannot render a dossier at all.
 const JOB_DETAIL_COLUMNS =
-  "id, title, company, location, salary, job_type, source_url, external_apply_url, about_role, responsibilities, requirements, nice_to_have, benefits, about_company, match_score, match_reason, matched_skills, missing_skills, found_at";
+  "id, title, company, location, salary, job_type, source_url, external_apply_url, about_role, responsibilities, requirements, nice_to_have, benefits, about_company, match_score, match_reason, matched_skills, missing_skills, company_research, found_at";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -264,6 +266,11 @@ const JobDetailSchema = z.object({
   match_reason: nullableText,
   matched_skills: stringArray,
   missing_skills: stringArray,
+  // jsonb, so Postgres has checked nothing about what is in here. parseDossier
+  // narrows it the same way this schema narrows the row, and answers null for
+  // both "no research yet" and "whatever is in the column is not a dossier" —
+  // the card's empty state is the honest render of either.
+  company_research: z.unknown().transform((value) => parseDossier(value)),
   found_at: z.string(),
 });
 

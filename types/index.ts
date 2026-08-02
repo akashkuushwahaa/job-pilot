@@ -122,15 +122,41 @@ export type JobListItem = {
   found_at: string;
 };
 
+// jobs.company_research — the dossier the research agent writes, and the only
+// jsonb column the app renders. Postgres does not check jsonb structurally, so
+// nothing may read this shape without parsing it first: a drifted field arrives
+// as `undefined` and throws at the render, not at the read. See lib/dossier.ts.
+//
+// Every field can be empty. A dossier is always written whole, but a run whose
+// browser phase found nothing produces one with thin arrays, and the card
+// renders only the sections that have content — the same rule JobDescription
+// follows.
+export type CompanyDossier = {
+  companyOverview: string;
+  techStack: string[];
+  culture: string[];
+  whyThisRole: string;
+  yourEdge: string[];
+  gapsToAddress: string[];
+  smartQuestions: string[];
+  interviewPrep: string[];
+  sources: string[];
+};
+
 // One whole job, as the details page renders it. Wider than JobListItem and
-// deliberately not a superset of the `jobs` table: `company_research` is absent
-// because feature 12 only draws the empty state, and `run_id` / `source` /
+// deliberately not a superset of the `jobs` table: `run_id` / `source` /
 // `external_id` are bookkeeping the page never shows.
 //
-// The five description fields are empty on every row discovered so far — Adzuna
-// returns a 500-character snippet, so feature 10 puts it in `about_role` verbatim
-// and writes nothing else. Rendering must therefore be per-section, never
-// assumed.
+// `company_research` is null until the research agent has run for this job.
+// Feature 13 added it to the read, the dossier markup and the button's handler
+// in one change, so there is never a card reporting "No research yet" over a
+// dossier that exists.
+//
+// The five description fields are empty on every row Adzuna discovered — it
+// returns a 500-character snippet, so feature 10 puts it in `about_role`
+// verbatim and writes nothing else. Feature 13's backfill fills them from the
+// real posting when it can reach one, so rendering stays per-section: present on
+// a backfilled row, absent on every row the backfill could not read.
 export type JobDetail = {
   id: string;
   title: string;
@@ -150,6 +176,7 @@ export type JobDetail = {
   match_reason: string | null;
   matched_skills: string[];
   missing_skills: string[];
+  company_research: CompanyDossier | null;
   found_at: string;
 };
 
