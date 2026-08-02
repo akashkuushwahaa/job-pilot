@@ -770,6 +770,26 @@ already pairs those two for matched-skill badges — so the design's green copy 
 the AA floor. The error banner cannot do the same because `--color-error` has no accessible pair.
 `role="status"`, since the message reports the result of an action the user asked for.
 
+**Feature 10 — the card became a Client Component and grew three more states.** The banner is now
+two-variant, sharing the shape above but swapping the colour set, exactly as `ResumeUpload`'s two
+banners do:
+
+```
+mt-4 flex items-center gap-2 rounded-lg border px-4 py-3 text-sm
+├ success: border-success/30 bg-success-lightest text-success-foreground  + Sparkles icon
+└ error:   border-error/30   bg-error/10          text-text-primary       (no icon)
+```
+
+- **A disabled control states its reason as muted text.** `mt-3 text-xs text-text-muted`, directly
+  under the row — the same treatment and the same class string as the Generate blocker in
+  `ResumeUpload`. This is now the project's pattern for any gated action: the disabled state and the
+  sentence explaining it always travel together.
+- **The in-flight line replaces the banner rather than sitting beside it.** `mt-4 text-sm
+  text-text-secondary`, `role="status"`, and the previous result is hidden while `isSearching` — a
+  stale "Found 8 jobs" above a live spinner reads as the current answer.
+- The field row is now a `<form>` with `onSubmit`, so Enter in either input runs the search. The
+  submit button is disabled on an empty job title, which is the same condition the route validates.
+
 ### JobFilters — `components/find-jobs/JobFilters.tsx`
 
 File: `components/find-jobs/JobFilters.tsx`

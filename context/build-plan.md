@@ -222,6 +222,24 @@ Agent calls Adzuna API to find jobs matching user's search criteria, scores them
 
 **PostHog events:** `job_search_started`, `job_found`
 
+> Corrected against the live Adzuna API and the delivered feature 10.
+> **`where` is omitted entirely when the location is empty** rather than sent blank, and the country
+> is detected only from an explicit country name — never from a city, because a wrong country
+> returns zero results silently rather than erroring.
+> **The description arrays are not filled.** Adzuna's `description` is a 500-character snippet that
+> cuts off mid-sentence, so `about_role` takes it verbatim and `responsibilities`, `requirements`,
+> `nice_to_have`, `benefits` and `about_company` stay empty. Feature 12 must render only the sections
+> that have content.
+> **Two rules the plan does not state** were settled here: the search is gated on
+> `completeness(profile).isComplete`, the same gate feature 08 puts on Generate, because a score
+> against a near-empty profile is meaningless; and a job whose GPT-4o scoring fails is logged to
+> `agent_logs` and skipped rather than saved unscored.
+> **Feature 10 also took the plain jobs read** that this plan leaves to feature 11 — deleting
+> `mockJobs()` and reading the user's own rows, newest first. Without it the success banner reports
+> jobs that the six mock rows underneath contradict, and the feature cannot be seen working at all.
+> Feature 11 still owns the filter, both sorts and pagination.
+> `architecture.md` is authoritative.
+
 ---
 
 ### 11 Filter + Sort + Pagination

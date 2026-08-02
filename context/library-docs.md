@@ -224,50 +224,101 @@ export async function searchJobs(
 
 ### Response Shape
 
-Each Adzuna job result contains:
+> Corrected against the live API in feature 10 — a search for "frontend engineer"
+> in London, all ten results inspected field by field. Three things in the shape
+> below were wrong or misleading; they are marked inline.
 
 ```typescript
 type AdzunaJob = {
   id: string;
   title: string;
   company: { display_name: string };
-  location: { display_name: string };
-  description: string; // snippet only — not full description
+  location: { display_name: string; area: string[] };
+  description: string; // snippet — exactly 500 chars, cut mid-word, ends "…"
   redirect_url: string; // Adzuna tracking URL → redirects to actual job
-  salary_min?: number;
-  salary_max?: number;
+  salary_min?: number; // float, not integer
+  salary_max?: number; // often EQUAL to salary_min when predicted
   salary_is_predicted: "0" | "1"; // "1" means salary is estimated
-  contract_type?: string;
+  contract_time?: string; // "full_time" | "part_time" — present on ~6 of 10
+  contract_type?: string; // "permanent" | "contract" — present on ~1 of 10
   created: string; // ISO date string
   category: { tag: string; label: string };
+  adref: string;
+  latitude: number;
+  longitude: number;
+  __CLASS__: string; // on every object, including the nested ones
 };
 ```
+
+**`contract_time` is the field that carries full-time/part-time, not
+`contract_type`.** The mapping below used to read `job_type` from
+`contract_type`, which is absent on nine listings in ten — so almost every job
+fell through to the `|| "fulltime"` default regardless of what it actually was.
+`lib/adzuna.ts` reads `contract_time` first, falls back to `contract_type`, and
+leaves `job_type` **null** when neither is stated rather than defaulting.
+
+**The description is 500 characters, not ~200, and it always truncates.** Every
+one of the ten ended mid-sentence with a `…`. Feature 10 stores it verbatim in
+`about_role` and writes nothing to `responsibilities`, `requirements`,
+`nice_to_have`, `benefits` or `about_company` — structuring a snippet that cuts
+off mid-sentence means inventing the part that was removed.
+
+**`salary_min` and `salary_max` are frequently identical**, because Adzuna
+predicts a salary when the listing does not state one (`salary_is_predicted:
+"1"`). Formatting a range naively produces "£70k - £70k". `formatSalary` in
+`lib/adzuna.ts` collapses an equal pair to a single figure; the SALARY EST.
+column header carries the estimate caveat.
 
 ### Saving Jobs to DB
 
+Feature 10 upserts onto `(user_id, source, external_id)` so a repeated search
+refreshes rows instead of duplicating them. **Three columns are deliberately
+absent from the payload, and their absence is the whole design:**
+
 ```typescript
-// Map Adzuna result to jobs table
+// agent/adzuna.ts — one row per scored job
 const jobRecord = {
   user_id: userId,
-  run_id: runId,
+  run_id: runId, // present, so it moves to the run that most recently found it
   source: "search", // always 'search' for Adzuna jobs
-  source_url: job.redirect_url,
-  external_apply_url: job.redirect_url,
+  external_id: job.externalId, // the dedupe key — Adzuna's stable id
+  source_url: job.redirectUrl,
+  external_apply_url: job.redirectUrl,
   title: job.title,
-  company: job.company.display_name,
-  location: job.location.display_name,
-  salary: job.salary_min
-    ? `$${Math.round(job.salary_min / 1000)}k - $${Math.round(job.salary_max! / 1000)}k`
-    : null,
-  job_type: job.contract_type || "fulltime",
-  about_role: job.description, // Adzuna returns snippet — used as description
-  match_score: scoredJob.matchScore,
-  match_reason: scoredJob.matchReason,
-  matched_skills: scoredJob.matchedSkills,
-  missing_skills: scoredJob.missingSkills,
-  found_at: new Date().toISOString(),
+  company: job.company,
+  location: job.location,
+  salary: job.salary, // formatted by lib/adzuna.ts, null when unstated
+  job_type: job.jobType, // null when Adzuna states neither contract field
+  about_role: job.description, // the 500-char snippet, verbatim
+  match_score: scored.matchScore,
+  match_reason: scored.matchReason,
+  matched_skills: scored.matchedSkills,
+  missing_skills: scored.missingSkills,
+  // found_at         — ABSENT. See below.
+  // company_research — ABSENT. A re-run must never wipe a dossier.
 };
+
+await insforge.database.from("jobs").upsert(rows, {
+  onConflict: "user_id,source,external_id",
+  defaultToNull: false, // absent columns take their DB default, not NULL
+});
 ```
+
+**PostgREST builds its `ON CONFLICT DO UPDATE SET` list from the payload's own
+keys.** A column that is never sent is therefore neither written on insert (the
+column default applies) nor touched on update. That is the only mechanism
+available for "insert this once and never change it again", and it is what gives
+`found_at` its meaning of *first discovered* — which is what the Date Found
+column claims.
+
+**The dedupe index cannot be partial.** Feature 04 created it with
+`WHERE external_id IS NOT NULL`. PostgreSQL infers a partial index for
+`ON CONFLICT` only when the statement repeats the predicate, and PostgREST's
+`on_conflict` parameter emits no `WHERE` — so the upsert failed with *"there is
+no unique or exclusion constraint matching the ON CONFLICT specification"*.
+Migration `20260802124740_jobs-dedupe-index-non-partial.sql` drops the predicate.
+This is behaviour-preserving: unique indexes are `NULLS DISTINCT` by default, so
+url-sourced rows with a NULL `external_id` still never collide.
 
 **Rules:**
 
@@ -277,6 +328,13 @@ const jobRecord = {
 - `salary_is_predicted: "1"` means Adzuna estimated the salary — this is normal
 - Adzuna description is a snippet — GPT-4o scores from it, not a full description
 - Default country to `'us'` — support `gb`, `au`, `ca` as alternatives
+- **Detect the country from explicit country names only, never from a city.** A
+  wrong country is not an error Adzuna reports; it silently returns nothing. And
+  never match the bare code `ca` — that is how half the United States writes
+  California
+- **Parse the response with zod, per result.** A third party payload is untrusted
+  input in the same way a GPT-4o response is. One malformed listing should cost
+  that listing, not the search
 
 ---
 

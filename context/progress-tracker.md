@@ -7,12 +7,14 @@ Update this file after every completed feature. Any AI agent reading this should
 ## Current Status
 
 **Phase:** Phase 3 — Find Jobs Page, in progress
-**Last completed:** 09 Find Jobs Page (Full UI). `/find-jobs` no longer renders `ComingSoon` — it is
-the real page on mock data: search controls with the result banner, the filter bar, the jobs table
-with colour-coded score bars, and derived pagination. Every control is inert or uncontrolled, so the
-whole page is server-rendered with no client JavaScript. Markup verified through a temporary preview
-route; not yet clicked in a browser.
-**Next:** 10 Adzuna Job Discovery — wires the Find Jobs button to `POST /api/agent/find`.
+**Last completed:** 10 Adzuna Job Discovery. The Find Jobs button is live: it opens an `agent_runs`
+record, searches Adzuna for IT jobs, scores every result against the saved profile with GPT-4o
+concurrently, upserts them onto the dedupe key, and reports "Found 8 jobs — 5 are strong matches".
+`mockJobs()` is gone — the table reads the user's own rows. First code in `agent/`, and the first
+writes to `agent_runs`, `jobs` and `agent_logs`. Verified live against Adzuna and GPT-4o through a
+temporary route; **the database round-trip has not run through the SDK yet** (see Notes).
+**Next:** 11 Filter + Sort + Pagination — wires the filter bar, both sorts and the pagination buttons
+to the read feature 10 already put on the page.
 
 ---
 
@@ -35,7 +37,7 @@ route; not yet clicked in a browser.
 ### Phase 3 — Find Jobs Page
 
 - [x] 09 Find Jobs Page — Full UI
-- [ ] 10 Adzuna Job Discovery
+- [x] 10 Adzuna Job Discovery
 - [ ] 11 Filter + Sort + Pagination
 
 ### Phase 4 — Job Details Page
@@ -622,11 +624,118 @@ the emitted HTML that twMerge resolved every override as intended: `w-auto` beat
 selects, `border-transparent` beat `border-border` on the filter input, `pl-9` beat `px-3`, and the
 current page button dropped `bg-surface` / `border-border` / `text-text-primary` for the accent set.
 
+### Feature 10 — Adzuna Job Discovery
+
+Designed through `/architect`. The first agent feature, and the first code in `agent/`.
+
+**Found during planning, and it changed the feature:** the dedupe index could not be used from
+PostgREST at all. Feature 04 created `jobs_user_source_external_key` as a *partial* unique index
+(`WHERE external_id IS NOT NULL`); PostgreSQL infers a partial index for `ON CONFLICT` only when the
+statement repeats the predicate, and PostgREST's `on_conflict` parameter emits no `WHERE`. Verified
+against the live database before a line was written: the predicate-free statement failed with
+*"there is no unique or exclusion constraint matching the ON CONFLICT specification"* and the same
+statement with the predicate succeeded. Feature 04's stated reason for the predicate — keeping
+url-sourced NULL rows from collapsing onto one — was also wrong: unique indexes are `NULLS DISTINCT`
+by default. Migration `20260802124740_jobs-dedupe-index-non-partial.sql` drops it, and two NULL
+`external_id` rows were confirmed to coexist afterwards. `architecture.md` corrected.
+
+Decisions:
+
+- **Feature 10 took the plain jobs read that build-plan.md assigns to feature 11.** Not the filter,
+  sorts or pagination — just `mockJobs()` deleted and the user's own rows read, newest first. Without
+  it the banner reports 8 jobs while six Vercel/Stripe/Linear mock rows sit underneath, and the
+  feature cannot be seen working. `build-plan.md`'s own core principle is that every feature is
+  visible and testable before the next starts.
+- **Gated on `completeness(profile).isComplete`**, re-checked in the route, the same gate feature 08
+  puts on Generate — with the reason as muted text under the row, the same class string. A score
+  against a near-empty profile is meaningless, and the score is the product.
+- **The description arrays are not filled.** Adzuna's snippet is 500 characters and truncates
+  mid-sentence, so `about_role` takes it verbatim and `responsibilities`, `requirements`,
+  `nice_to_have`, `benefits` and `about_company` stay empty. Structuring it means inventing the part
+  that was cut. Feature 12 must render only the sections that have content — its job details page
+  will look thinner than the design.
+- **Scoring is concurrent and a failed score drops the job.** `Promise.allSettled` over all ten:
+  3-5s instead of 30-40s sequential, and one bad response cannot take the other nine with it. An
+  unscored job is logged to `agent_logs` at `warning` and skipped, because it cannot be ranked or
+  rendered — `JobListItem.match_score` is a `number`.
+- **`found_at` and `company_research` are omitted from the upsert payload.** PostgREST builds its
+  `ON CONFLICT DO UPDATE SET` list from the payload's keys, so omission is the only way to say
+  "write once, never touch again". `found_at` therefore means *first discovered*, which is what the
+  Date Found column claims. `run_id` **is** sent, so it moves to the run that most recently surfaced
+  the job — which is what feature 16's activity feed wants.
+- **`matched_skills` is filtered back down to skills the profile actually lists**, compared on
+  letters and digits only so "Node.js" matches "nodejs". It is rendered as the candidate's own claim,
+  so it gets the feature 08 treatment: the model judges, the row supplies the facts. `missing_skills`
+  is a claim about the *job* and passes through unfiltered — there is nothing to check it against.
+- **Country is detected from explicit country names only.** Never from a city, and never from the
+  bare code `ca` — that is how half the United States writes California. A wrong country is not an
+  error Adzuna reports; it silently returns nothing.
+- **The banner sentence was reworded.** The design's "Found 8 jobs and saved 4 strong matches" reads
+  as though only the strong ones were kept, but `project-overview.md` requires every job visible
+  regardless of score and all of them are saved. Now "Found 8 jobs — 4 are strong matches", with
+  singular, zero-strong and zero-result forms.
+- **`agent/logs.ts` added; `agent/extractor.ts` removed from the architecture listing.**
+  `code-standards.md` and `library-docs.md` both call `logAgentError` without saying where it lives,
+  and feature 13 needs the same helper. `extractor.ts` was listed for "job description extraction +
+  structuring", which the decision above means nothing will ever call.
+- **Agent functions take the InsForge client as a parameter** rather than calling
+  `createInsforgeServer()` themselves — one run makes five or six writes and they all belong to the
+  same request. `InsforgeServerClient` is now exported from `lib/insforge-server.ts`.
+- **No new PostHog event.** `job_search_started` (client, on submit) and `job_found` (server, one per
+  saved job, inside `after()` with `Promise.all`) were both already on the approved list. It stays
+  at seven.
+
+Found while building:
+
+- **`contract_time`, not `contract_type`, carries full-time/part-time.** `library-docs.md` mapped
+  `job_type` from `contract_type`, which was present on 1 of 10 live results while `contract_time`
+  was present on 6. Nearly every job would have fallen through to the `|| "fulltime"` default. Now
+  `contract_time` first, `contract_type` second, and **null** when neither is stated — defaulting an
+  unknown listing to "fulltime" is inventing a term of employment. **Fifth package or API in four
+  features whose real shape did not match the docs.**
+- **The snippet is 500 characters, not ~200**, and every one of the ten truncated mid-sentence with
+  a `…`. The scoring prompt says so on the description itself rather than in the shared rules — the
+  feature 08 lesson that a rule attached to the item it governs beats the same rule stated once at
+  the top.
+- **`salary_min` and `salary_max` are frequently identical**, because Adzuna predicts a salary when
+  the listing does not state one. A naive range renders "£70k - £70k"; an equal pair now collapses to
+  a single figure.
+- **An App Router folder starting with `_` is a private folder and is never routed.** The temporary
+  verification route was first written to `app/api/__probe/` and 404'd until it was renamed. Worth
+  knowing before blaming the dev server.
+
+**Verified by execution:** a temporary route (since deleted, confirmed 404) ran the real client,
+prompt and schema against the live Adzuna API and GPT-4o. Ten London listings parsed; salary rendered
+`£70k` for an equal predicted pair and `£80k - £95k` for a real range; `job_type` was `fulltime`
+where `contract_time` said so and null otherwise. Three were scored — 65 for a Java-heavy role
+against a React profile, 95 for a React/Next/GraphQL role, 85 for a founding role with an AI-security
+gap — and every `matchedSkills` entry was genuinely on the fixture profile while `missingSkills`
+named "Java", "open-source" and "AI security", none of which are. Country detection returned `us` for
+"San Francisco, CA", `gb` for "London, UK" and "Manchester, England", `ca` for "Toronto, Canada",
+`au` for "Sydney, Australia", and `us` for "Remote" and "". All five banner sentences rendered.
+`parseJobList` kept the one good row of three and dropped a row missing its title and a bare string.
+`tsc`, lint and build clean, every route `ƒ`, `/api/agent/find` registered, and anonymous
+`POST /api/agent/find` 307s to `/login`.
+
 ---
 
 ## Notes
 
 _Add notes here as the build progresses — workarounds, patterns, anything that differs from the context files._
+
+- **Feature 10's database round-trip has not run through the SDK.** The `ON CONFLICT` semantics were
+  proven with raw SQL through MCP — including that `company_research` and `found_at` survive an
+  upsert — but no `discoverJobs()` call has yet reached Postgres through `@insforge/sdk`, because
+  every write is scoped by RLS to a real signed-in session and there is no way to hold one
+  headlessly. Unexercised: the `agent_runs` open/close lifecycle, the upsert itself, `agent_logs`
+  rows, and the `defaultToNull: false` flag. **This is the first thing to check in a browser.**
+- **Feature 10's UI has not been clicked.** Unexercised: the disabled state and its reason, the
+  in-flight line, both banner variants, Enter-to-submit, and `router.refresh()` bringing the new rows
+  onto the table. `job_found` also needs PostHog's Activity view — it goes through `posthog-node` and
+  never appears in the browser log.
+- **Re-running the same search is the test that matters.** Row count must not change, `found_at` must
+  not move, `run_id` must move to the new run, and a `company_research` value set by hand must
+  survive. That is the entire dedupe design and it has never run through the real client.
 
 - **Feature 09 is UI only and every control is inert.** The Find Jobs button has no handler
   (feature 10), and the filter input, both selects and every pagination button are uncontrolled or
