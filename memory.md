@@ -1,115 +1,133 @@
-# Memory — Feature 07: AI Profile Extraction from Resume (built, exercised against the live model)
+# Memory — Feature 08: Resume PDF Generation from Profile (built, exercised against the live model)
 
 Last updated: 2026-08-02
 
-Phase 2 is nearly done. Features 05, 06 and 07 complete. Next is feature 08 — Resume PDF Generation.
+Phase 2 is complete. Features 05, 06, 07 and 08 done. Next is Phase 3 — feature 09, Find Jobs
+Page (Full UI), the first mock-data UI build since feature 05.
 
 ## What was built
 
-- **`lib/resume-extraction.ts`** — the whole feature. `extractProfileFromResume(pdf: ArrayBuffer)`
-  returns `{ success, values } | { success: false, error }`. Holds the 200-char text floor, the
-  15,000-char truncation budget, the prompt, the zod schema, and the mapping to form values.
-- **`lib/openai.ts`** — `getOpenAI()` (built on first use, returns null when unconfigured rather than
-  throwing at import) and `OPENAI_MODEL = "gpt-4o"` pinned so no call site writes it inline.
-- **`app/api/resume/extract/route.ts`** — `POST`, **takes no request body**. Reads `resume_path` from
-  the caller's own row, `storage.download`s it, extracts, returns form values. Writes nothing.
-- **`components/profile/ProfileWorkspace.tsx`** — owns `ProfileFormValues`; renders a fragment of
-  `ResumeUpload` + `ProfileForm` so the page's `space-y-6` still applies.
-- Rewired: `ResumeUpload` (Extract button, `isExtracting`, own status banner), `ProfileForm` (now
-  controlled — `values`/`setValues` are props; keeps only `status`/`isSaving`), `app/profile/page.tsx`.
-- `types/index.ts` gained `DEGREE_OPTIONS`/`Degree` (moved out of `ProfileForm.tsx`) and
-  `ExtractedFormValues`.
-- `openai@7.3.0` and `pdf-parse@2.4.5` installed. `next.config.ts` gained
-  `serverExternalPackages: ["pdf-parse"]`.
+- **`lib/resume-generation.ts`** — `generateResumeContent(profile)` returns
+  `{ success, content } | { success: false, error }`. Holds the prompt, the zod schema, the
+  per-index bullet alignment, and `selectRoles()`. Content is `{ summary, roles }` where each role
+  is the profile's own entry spread with model-written `bullets`.
+- **`lib/resume-pdf.tsx`** — the react-pdf `Document` plus `renderResumePdf(profile, content)`.
+  A4, built-in Helvetica, one `COLOR` object holding the `ui-tokens.md` values. In `lib/` because
+  it is not a React DOM component and `components/` is scoped to app UI.
+- **`app/api/resume/generate/route.ts`** — `POST`, **no request body**. Reads the caller's own row,
+  gates on `completeness().isComplete`, generates, renders, uploads over `{user.id}/resume.pdf`,
+  upserts only `{ id, email, resume_path }`.
+- **`lib/profile.ts`** gained `isSameFormValues(a, b)` — field-by-field, not `JSON.stringify`.
+- **`components/profile/ProfileWorkspace.tsx`** — now also holds `savedValues` and computes
+  `generateBlocker: "incomplete" | "unsaved" | null`.
+- **`components/profile/ProfileForm.tsx`** — gained an `onSaved` prop so a successful save moves the
+  workspace's snapshot.
+- **`components/profile/ResumeUpload.tsx`** — Generate wired: inline confirm, both disabled states
+  with their reasons, `isGenerating`, own status banner, `router.refresh()`.
+- `@react-pdf/renderer@4.5.1` installed. **No `serverExternalPackages` entry needed** — unlike
+  `pdf-parse`, it bundles and renders clean under Turbopack.
+- Docs updated: `progress-tracker.md`, `ui-registry.md`, `architecture.md`, `build-plan.md`
+  (feature 08 correction note), `library-docs.md` (two real corrections — see below).
 
 ## Decisions made
 
-- **The PDF is downloaded from storage, never re-posted.** The build plan said "uploaded PDF buffer",
-  but the button only exists once `resume_path` is set. The route accepts no key, path or user id
-  from the caller — storage still has no ownership model, so this is the only defence.
-- **Extraction writes nothing.** No `profiles` write, no `revalidatePath`. A page refresh discards a
-  bad extraction entirely, and that is what makes overwriting filled fields safe.
-- **Merge rule: named fields win, unnamed fields keep what the user typed.** The response carries only
-  keys the resume spoke to, so the merge is a spread. `education` merges key by key; work experience
-  replaces the list wholesale.
-- **Facts only.** `email`, `work_authorization` and all four Job Preferences are never extracted.
-  `ExtractedFormValues` `Omit`s them, so the compiler enforces it rather than discipline.
-- **Extraction lives in `lib/`, not `agent/`.** No runId, no `agent_logs`, one request/response — it
-  does not meet the agent-function contract.
-- **Form state lifted to `ProfileWorkspace`** because two cards now write to it. The page still
-  renders it unkeyed, for the feature 06 reason.
+- **Overwrite stays, but it is confirmed.** One key, one `resume_path`, no undo — and generating
+  destroys the uploaded original that extraction reads. With a resume stored the button does not
+  act: it swaps the row into Cancel / Replace resume. Inline, not a dialog — `ui-rules.md` has none
+  and this does not earn a Radix dependency.
+- **Generate is disabled while the form is ahead of the saved row.** Generation reads the row and the
+  form is routinely ahead of it — extraction exists to put unsaved values on screen. Without this,
+  Extract → Generate silently builds a resume from the *old* row and overwrites the real one.
+- **Gated on `completeness().isComplete`** — the same ten fields the banner reports, re-checked in
+  the route. The button carries the reason as muted text; a disabled control that does not say why
+  reads as broken.
+- **GPT-4o writes prose only.** It returns summary + bullets. Every fact — name, company, title,
+  dates, degree, institution, skills — is rendered straight off the row. A model that can restate an
+  employer's name can invent one.
+- **A failure writes nothing.** Model outage or render error returns before touching storage, so the
+  stored resume always survives. This is what makes the overwrite survivable.
+- **Bullets fall back per index, never across roles** — shifting them up would attribute one
+  employer's work to another.
 - **No new PostHog event.** The list stays at seven.
 
 ## Problems solved
 
-- **`pdf-parse@2` is not the API `library-docs.md` documented.** The docs showed
-  `import pdf from "pdf-parse"; await pdf(buffer)` — that is v1 and does not exist in the installed
-  v2.4.5, which is a `PDFParse` class over pdfjs-dist: `new PDFParse({ data })` → `getText()` →
-  `.text`. It needs `serverExternalPackages` and an `await parser.destroy()` in a `finally` or it
-  leaks a pdfjs worker per call. `library-docs.md` corrected. **Third time in two features that an
-  installed package did not match its documentation — read the `.d.ts` first, every time.**
-- **GPT-4o read seven years of experience as four.** "March 2022 — Present" is unresolvable without
-  knowing the present, and the model anchored on its own training cutoff. Fixed by putting today's
-  date in the prompt; re-ran and it returned 7. **Every dated GPT-4o call in features 10 and 13 will
-  hit this** — the rule is now in `library-docs.md`.
-- **`max_tokens` is deprecated in openai v7** in favour of `max_completion_tokens`.
-- **`json_object` only guarantees valid JSON for a response that completed.** Hitting the token
-  ceiling truncates mid-object and `JSON.parse` throws, so `finish_reason === "length"` is logged
-  separately to tell a truncation from a malformed response.
+- **The InsForge SDK's `upload()` takes `(path, file: File | Blob)` — there is no third options
+  argument.** `library-docs.md` showed `upload(key, buffer, { contentType, upsert: true })`; none of
+  it exists in `@insforge/sdk@1.5.1`. The buffer is wrapped in a `File`. **Fourth installed package
+  in three features whose real API did not match the docs — read the `.d.ts` first, every time.**
+- **react-pdf's "supported CSS properties" list in `library-docs.md` was a subset.** The real `Style`
+  type is `node_modules/@react-pdf/stylesheet/lib/index.d.ts` and includes `borderBottomWidth`,
+  `letterSpacing`, `textTransform`, `flexWrap` and `gap` — all of which this document uses.
+- **GPT-4o wrote the current role in past tense** despite the rule saying otherwise, because the rule
+  sat in the shared instructions with nothing tying it to a specific role. Marking the role itself
+  `(CURRENT ROLE — write these bullets in present tense)` fixed it on the next run. **A rule stated
+  once at the top is weaker than the same rule attached to the item it governs** — this will matter
+  for features 10 and 13.
+- **A branch was cut off the wrong base.** HEAD moved from `feat/07` to `main` mid-session, so the
+  first `feat/08` branch had none of feature 07. Caught before any code was written, by grepping for
+  a file that should have existed. Check `git log` immediately before branching.
 
 ## Current state
 
 - `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean. Every route `ƒ`.
-  `/api/resume/extract` is registered and 307s to `/login` anonymously.
-- **Feature 07 exercised against the live model.** A temporary route (since deleted, confirmed 404)
-  ran the real prompt, schema and mapping over a generated one-page resume: all twelve permitted
-  fields correct — dates `YYYY-MM`, `currently_working: true` with `end_date: null`, degree from
-  `DEGREE_OPTIONS`, valid `experience_level` enum, no email, no job preferences. A text-free PDF and
-  a non-PDF both returned the build plan's exact "Could not extract text from this PDF" message.
-- **Nothing in feature 07 has been clicked in a browser.** The UI wiring — button, loading state,
-  merge into form state, status banner — is reasoned but unobserved.
-- Branch is still **`fix/06-profile-save-review`**. Feature 07 is uncommitted; feature 06 is
-  committed through `24c4ee9`. Neither is merged to `main` (`main` was merged in via PR #1).
+  `/api/resume/generate` is registered and 307s to `/login` anonymously.
+- **Feature 08 exercised against the live model end to end.** A temporary route (since deleted,
+  confirmed 404) ran the real prompt, schema, renderer and `pdf-parse` over a complete seven-year
+  profile fixture: a 3.5KB `%PDF-1.3` that parses back to **one page** with header, contact line
+  (protocols stripped), summary, skills, three roles and education. Dates rendered
+  `Mar 2022 — Present`, `Jul 2019 — Feb 2022`, `Jan 2018 — Jun 2019`. The role with empty
+  responsibilities got **zero** bullets rather than invented ones. No job preferences, salary
+  expectation or work authorization anywhere in the output.
+- **Nothing in feature 08 has been clicked in a browser**, and it has never read a real `profiles`
+  row — only the fixture.
+- **Git, needs attention:** `feat/07-ai-profile-extraction` was merged into **local `main`** with
+  `--no-ff` (commit `2e83789`). **Not pushed.** Undo with `git reset --hard 51f7798` on main.
+  Feature 08 sits **uncommitted** on `feat/08-resume-pdf-generation`, cut off that updated main.
+  Nothing from features 06, 07 or 08 has reached `origin/main`.
 
 ## Next session starts with
 
-1. **Click through feature 07 in a browser, in this order:** type into a field → press Extract →
-   confirm the typing survives. That finally puts eyes on the feature 06 remount fix, which
-   extraction now stresses directly. Then extract onto a full profile to watch the overwrite rule,
-   refresh without saving to confirm the stored row is untouched, and save afterwards.
-2. **Commit feature 07** (branch per feature: `feat/07-ai-profile-extraction` off main, or continue on
-   the current branch and decide the merge).
-3. **Feature 08 — Resume PDF Generation from Profile.** `POST /api/resume/generate`: GPT-4o writes
-   the content at temperature 0.7 / 1000 tokens, `@react-pdf/renderer` renders it with
-   `renderToBuffer()`, uploaded over `{user.id}/resume.pdf`. `@react-pdf/renderer` is not installed
-   yet. Note the build plan's feature 08 text still says `resume_pdf_url` — that column does not
-   exist; it is `resume_path` and it holds a key. `lib/openai.ts` and the extraction module are the
-   patterns to follow.
+1. **Commit feature 08.** Granular commits in the feature 07 style: deps, then the two `lib/`
+   modules, then the route, then the UI wiring, then the docs.
+2. **Click through feature 08 in a browser**, in this order: with an incomplete profile confirm the
+   button is disabled and says why → complete and save → type one character and confirm it flips to
+   "unsaved" → save → Generate → confirm the replace step → check the banner and that View opens the
+   new PDF. **This destroys the resume feature 07 has been extracting from** — re-upload a copy
+   afterwards if it is worth keeping. It also finally exercises feature 07's UI, which is still
+   unobserved.
+3. **Decide the push/PR story** for features 06–08 before starting Phase 3.
+4. **Feature 09 — Find Jobs Page, full UI with mock data.** No logic. Search controls card, filter
+   bar, jobs table, pagination. It deletes the `/find-jobs` `ComingSoon` stub. `context/designs/`
+   holds the reference; feature 05 is the pattern for building a full page against a design.
 
 ## Open questions
 
-**Feature 07, unverified:**
+**Feature 08, unverified:**
 
 - **The whole UI is unobserved** — see "Next session starts with".
-- **A real-world resume has never been through it.** Only a generated single-column PDF. Multi-column
-  layouts and heavy formatting are where pdf-parse's text order gets scrambled.
-- **The 800-token ceiling is tight** for three roles with responsibilities. `finish_reason === "length"`
-  is logged; if it ever appears, raise the ceiling and update `library-docs.md` rather than diverging.
+- **It has never read a real `profiles` row**, only the fixture.
+- **The per-index bullet fallback has never run.** It needs a response carrying fewer roles than
+  were sent, which the model has not done yet.
+- **Single-page output is a content budget, not a guarantee.** react-pdf paginates silently. A
+  profile with three long roles at four bullets each may spill; nothing warns if it does.
 
-**Carried forward from feature 06, still open:**
+**Carried forward, still open:**
 
+- **Feature 07's UI is also unobserved** — the Extract button, its loading state, the merge into
+  form state and its banner have never been clicked.
+- **A real-world resume has never been through extraction.** Only a generated single-column PDF.
 - **The comma-separated → `text[]` split has never run.** `job_titles_seeking` and
-  `preferred_locations` are both empty in the saved row. Extraction deliberately leaves them alone,
-  so this still needs typing two titles manually and checking the column is a two-element array.
-- **`profile_completed` has not been confirmed arriving.** Goes through `posthog-node` and never
-  reaches the browser log — needs PostHog's Activity view. Also confirm it does not fire twice.
+  `preferred_locations` are both empty in the saved row.
+- **`profile_completed` has not been confirmed arriving.** Goes through `posthog-node`; needs
+  PostHog's Activity view. Also confirm it does not fire twice.
 - **Server-side upload rejection is untested.** `curl -F` a non-PDF and a >5MB file at `/api/resume`
   with a session cookie, bypassing the cosmetic client checks.
 - **Neither error boundary has ever rendered.** Zero `$exception` events.
 - **Google OAuth has not run since the feature-03 fixes** — the last sign-ins were GitHub.
 - **Cross-user isolation is unproven for both RLS and storage.** One user exists and admin tooling
-  refuses `SET ROLE`. Storage has no ownership model, so `/api/resume` and `/api/resume/extract` are
-  the only enforcement — worth a real test the moment a second account exists.
+  refuses `SET ROLE`. Storage has no ownership model, so the three `/api/resume*` routes are the only
+  enforcement — worth a real test the moment a second account exists.
 - **Rotate the InsForge admin API key** if it was ever committed, pushed or deployed. The full-access
   key had been pasted into the public anon-key variable and served to browsers before being replaced.
 - **Input masking has not been confirmed in an actual recording.**
@@ -118,6 +136,7 @@ Phase 2 is nearly done. Features 05, 06 and 07 complete. Next is feature 08 — 
 
 - `Button` size `md` is `h-9` but form controls are `h-10`, so any button on a field row needs an
   explicit `h-10`. Consider making `md` `h-10` when feature 09 builds the search controls.
-- "Generate Resume from Profile" is still inert — feature 08.
-- `tailwindcss@^4` is installed despite `AGENTS.md` saying to lock 3.4. Nothing has broken, but the
-  instruction and the lockfile disagree.
+- `tailwindcss@^4` is installed despite `AGENTS.md` saying to lock 3.4. Deliberate (feature 02), but
+  the instruction and the lockfile still disagree.
+- `progress-tracker.md`'s feature 05 note still calls "Generate Resume from Profile" inert. It is a
+  historical statement about feature 05, but it reads as current.

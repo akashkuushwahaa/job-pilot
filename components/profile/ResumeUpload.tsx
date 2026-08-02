@@ -14,19 +14,38 @@ const ERROR_MESSAGES = {
   size: "That file is larger than 5MB. Upload a smaller PDF.",
   upload: "Could not upload that resume. Please retry.",
   extract: "Could not read your resume. Please retry.",
+  generate: "Could not generate your resume. Please retry.",
 } as const;
 
 const EXTRACT_SUCCESS =
   "Fields filled from your resume. Review them, then press Save Profile.";
 
-type ExtractStatus = { kind: "error" | "success"; message: string } | null;
+const GENERATE_SUCCESS =
+  "Resume generated from your profile. Open it to review.";
+
+// Why the Generate button is unavailable. Generation reads the saved row, so
+// both cases are the same problem seen twice: the row is not what the user is
+// looking at.
+const BLOCKER_MESSAGES = {
+  incomplete:
+    "Complete your profile before generating — the banner above lists what is still missing.",
+  unsaved:
+    "Save your profile first. Generating reads your saved details, not what is currently typed in.",
+} as const;
+
+type Banner = { kind: "error" | "success"; message: string } | null;
 
 type Props = {
   resumePath: string | null;
   onExtracted: (values: ExtractedFormValues) => void;
+  generateBlocker: keyof typeof BLOCKER_MESSAGES | null;
 };
 
-export function ResumeUpload({ resumePath, onExtracted }: Props) {
+export function ResumeUpload({
+  resumePath,
+  onExtracted,
+  generateBlocker,
+}: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -34,7 +53,10 @@ export function ResumeUpload({ resumePath, onExtracted }: Props) {
   const [isReplacing, setIsReplacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
-  const [extractStatus, setExtractStatus] = useState<ExtractStatus>(null);
+  const [extractStatus, setExtractStatus] = useState<Banner>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [generateStatus, setGenerateStatus] = useState<Banner>(null);
 
   function resetInput(): void {
     if (inputRef.current) {
@@ -122,7 +144,43 @@ export function ResumeUpload({ resumePath, onExtracted }: Props) {
     }
   }
 
+  // Also sends no body — the route reads the caller's own saved row. The two
+  // gates on this button are re-checked there; these only shape the UI.
+  async function generateFromProfile(): Promise<void> {
+    setIsConfirming(false);
+    setGenerateStatus(null);
+    setIsGenerating(true);
+
+    try {
+      const response = await fetch("/api/resume/generate", { method: "POST" });
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setGenerateStatus({
+          kind: "error",
+          message: result.error ?? ERROR_MESSAGES.generate,
+        });
+        return;
+      }
+
+      setIsReplacing(false);
+      // The stored resume is no longer the one those fields were read out of.
+      setExtractStatus(null);
+      setGenerateStatus({ kind: "success", message: GENERATE_SUCCESS });
+      // Same reason as upload: resume_path lives on the server-rendered row, so
+      // the preview only appears once the page data is refetched.
+      router.refresh();
+    } catch (generateError) {
+      console.error("[profile/ResumeUpload] generate", generateError);
+      setGenerateStatus({ kind: "error", message: ERROR_MESSAGES.generate });
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
   const showDropzone = resumePath === null || isReplacing;
+  const blockerMessage =
+    generateBlocker === null ? null : BLOCKER_MESSAGES[generateBlocker];
 
   return (
     <section className="rounded-xl border border-border bg-surface p-6 shadow-sm">
@@ -237,14 +295,70 @@ export function ResumeUpload({ resumePath, onExtracted }: Props) {
         </div>
       ) : null}
 
-      <div className="mt-6 flex flex-col gap-4 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-text-secondary">
-          Need a fresh document based on the fields below?
-        </p>
-        <Button type="button" className="sm:shrink-0">
-          <FileText aria-hidden className="size-4" />
-          Generate Resume from Profile
-        </Button>
+      <div className="mt-6 border-t border-border pt-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-text-secondary">
+            {isConfirming
+              ? "This replaces your stored resume. It cannot be undone."
+              : "Need a fresh document based on the fields below?"}
+          </p>
+
+          {isConfirming ? (
+            <div className="flex gap-2 sm:shrink-0">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setIsConfirming(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                // The form can go stale between opening this confirm and
+                // answering it — a keystroke in the profile below is enough.
+                disabled={generateBlocker !== null}
+                onClick={() => void generateFromProfile()}
+              >
+                Replace resume
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              disabled={generateBlocker !== null || isGenerating}
+              // Generating over an existing resume destroys the file it
+              // replaces, and there is only ever one. Asking first is the whole
+              // difference between a deliberate act and a misplaced click.
+              onClick={() =>
+                resumePath === null
+                  ? void generateFromProfile()
+                  : setIsConfirming(true)
+              }
+              className="sm:shrink-0"
+            >
+              <FileText aria-hidden className="size-4" />
+              {isGenerating ? "Generating…" : "Generate Resume from Profile"}
+            </Button>
+          )}
+        </div>
+
+        {blockerMessage !== null && !isGenerating ? (
+          <p className="mt-3 text-xs text-text-muted">{blockerMessage}</p>
+        ) : null}
+
+        {generateStatus ? (
+          <p
+            role={generateStatus.kind === "error" ? "alert" : "status"}
+            className={cn(
+              "mt-3 rounded-md border px-3 py-2 text-sm text-text-primary",
+              generateStatus.kind === "error"
+                ? "border-error/30 bg-error/10"
+                : "border-success/30 bg-success-lightest",
+            )}
+          >
+            {generateStatus.message}
+          </p>
+        ) : null}
       </div>
     </section>
   );

@@ -155,6 +155,14 @@ Generate a clean professional PDF resume from current profile data using GPT-4o.
 - Buffer uploaded to InsForge Storage at resumes/{user_id}/resume.pdf with upsert: true
 - resume_pdf_url updated in profiles table
 
+> Corrected against features 04 and 08. `resume_pdf_url` does not exist — the column is
+> `resume_path` and it holds an object key, because the bucket is private. `upload()` has no
+> `upsert` option either; writing the same key replaces the object. Two rules the plan does not
+> state were added in feature 08: generation reads the **saved row**, so the button is disabled
+> while the form is ahead of it, and it is gated on `completeness().isComplete` — generating from a
+> thin profile would overwrite a real uploaded resume with a near-empty document.
+> `architecture.md` is authoritative.
+
 ---
 
 ## Phase 3 — Find Jobs Page
@@ -174,6 +182,16 @@ Build the complete Find Jobs page UI with mock data. No logic yet.
   - Filter bar: text search input "Filter by company or role...", All Matches dropdown, Match Score sort dropdown
   - Jobs table with columns: COMPANY, ROLE, MATCH SCORE (color coded progress bar + percentage), SALARY EST., SOURCE (Search/URL badge), DATE FOUND
   - Pagination — "Showing 1 to 6 of 24 results", Previous, page numbers, Next
+
+> Corrected against the design and `project-overview.md` in feature 09. **The SOURCE column was not
+> built.** `context/designs/find-jobs.png` does not draw it, and it could only ever hold one value:
+> `jobs.source` is `'search' | 'url'`, discovery is Adzuna-only, and "URL input for manual job
+> import" is listed under Features Out of Scope. A column with one constant value is noise. The
+> "Jobs by Adzuna" credit `project-overview.md` requires on job listings carries the same
+> information and is rendered under the jobs card instead. **"Showing 1 to 6 of 24 results" against
+> eight page buttons is also not self-consistent** — 24 results at 6 per page is four pages. The
+> component derives its page count from the totals, and the mock totals 48 so the design's ellipsis
+> and page 8 still render.
 
 ---
 

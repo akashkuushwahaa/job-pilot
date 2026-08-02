@@ -109,6 +109,19 @@ export type ProfileFormValues = {
   preferred_locations: string;
 };
 
+// One row of the Find Jobs list — the subset of the `jobs` table the table
+// renders, and nothing more. Feature 10 writes the full row; feature 11 selects
+// these columns onto this shape. `salary` is nullable because Adzuna does not
+// always return one.
+export type JobListItem = {
+  id: string;
+  company: string;
+  title: string;
+  match_score: number;
+  salary: string | null;
+  found_at: string;
+};
+
 // What resume extraction is allowed to hand back. The omissions are the point:
 // email comes from the session, and work authorization and the four job
 // preferences are things a resume does not state — filling them would mean
