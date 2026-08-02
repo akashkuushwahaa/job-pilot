@@ -503,22 +503,37 @@ Takes `resumePath: string | null`. With no resume it shows the dropzone; with on
 immediately to `POST /api/resume`, then `router.refresh()` — the stored path lives on the
 server-rendered row, so the card only updates once the page data is refetched.
 
-**Footer row recipe — one shape, used twice.** Both the extract row and the generate row are
-`mt-6 flex flex-col gap-4 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between`:
-explanatory `text-sm text-text-secondary` on the left, an icon + label button on the right with
-`sm:shrink-0`. Any future "here is an action related to this card" row uses the same one.
+**Footer row recipe — one shape, used twice.** Both the extract row and the generate row are a
+`mt-6 border-t border-border pt-6` wrapper holding a
+`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between` control line: explanatory
+`text-sm text-text-secondary` on the left, an icon + label button on the right with `sm:shrink-0`.
+Messages hang below the control line, inside the wrapper. Any future "here is an action related to
+this card" row uses the same one.
 
 The extract row renders only when `resumePath !== null` — including while a replacement is being
 chosen, since the resume it reads is the saved one either way. Its button is
 `variant="secondary"` with a `Sparkles` icon, and it swaps its label to "Extracting…" while
 `isExtracting` rather than showing a spinner, matching the dropzone's "Uploading…" and
-`ProfileForm`'s "Saving…".
+`ProfileForm`'s "Saving…". The generate row is always rendered, primary variant, `FileText` icon,
+and swaps to "Generating…" the same way.
+
+**Inline confirm recipe — no dialog primitive.** Generating replaces the one stored resume and
+cannot be undone, so with a resume already stored the button does not act: it swaps the row into a
+confirm state. The left-hand text becomes the consequence ("This replaces your stored resume. It
+cannot be undone.") and the single button becomes `Cancel` (secondary) + `Replace resume` (primary)
+in a `flex gap-2 sm:shrink-0`. Reach for this rather than a modal whenever a destructive action
+needs a second beat — the card already has the user's attention and `ui-rules.md` has no dialog.
+
+**Disabled-with-a-reason.** A disabled button that does not say why reads as broken. `Generate`
+takes `generateBlocker: "incomplete" | "unsaved" | null` from `ProfileWorkspace` and renders the
+matching sentence as `mt-3 text-xs text-text-muted` under the row. Small, muted, permanent — it is a
+condition, not an event, so it is not a status banner.
 
 **Status banner recipe — shared with `ProfileForm`.** `mt-3 rounded-md border px-3 py-2 text-sm
 text-text-primary`, then `border-error/30 bg-error/10` or `border-success/30 bg-success-lightest`,
-with `role="alert"` on error and `role="status"` on success. Upload errors and extract status are
-deliberately separate state rendered in separate slots — each message sits next to the control that
-produced it.
+with `role="alert"` on error and `role="status"` on success. Upload errors, extract status and
+generate status are three deliberately separate pieces of state in three separate slots — each
+message sits next to the control that produced it.
 
 ### ResumePreview — `components/profile/ResumePreview.tsx`
 
@@ -682,6 +697,17 @@ The merge is a spread: extraction returns only the keys the resume spoke to, so 
 unnamed fields keep whatever the user typed. `education` merges key by key rather than wholesale.
 Nothing is persisted by any of it — a page refresh restores the saved row, which is what makes
 overwriting filled fields safe.
+
+It also holds `savedValues`, a second copy of the form values seeded from the same server-rendered
+row and replaced by whatever a save normalised (`ProfileForm` reports it up through `onSaved`).
+`isSameFormValues` in `lib/profile.ts` compares the two field by field — not by `JSON.stringify`,
+because a work-experience entry reaches the form from `EMPTY_ROLE`, from extraction, and from a jsonb
+column that returns its keys in Postgres's own order, so identical roles can serialise differently.
+
+**Any card action that reads the saved row needs this snapshot.** The form is routinely ahead of the
+database — that is the entire point of extraction — so an action that silently reads the row while
+the user is looking at unsaved values produces a result they cannot account for. `generateBlocker`
+is computed here and passed down as a reason, not a boolean.
 
 ### Profile page — `app/profile/page.tsx`
 

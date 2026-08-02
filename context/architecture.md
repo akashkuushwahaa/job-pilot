@@ -121,6 +121,8 @@
 │   ├── posthog-server.ts                  → captureServerEvent — server-side PostHog capture
 │   ├── openai.ts                          → OpenAI client instance + the pinned model string
 │   ├── resume-extraction.ts               → PDF text + GPT-4o prompt, schema, and form mapping
+│   ├── resume-generation.ts               → GPT-4o prompt, schema, and bullet alignment
+│   ├── resume-pdf.tsx                     → The react-pdf Document + renderResumePdf()
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
 │   ├── profile.ts                         → parseProfile + both directions of the row <-> form mapping
@@ -233,21 +235,35 @@ ProfileWorkspace merges them into form state
 Nothing is persisted. The user reviews and presses Save Profile.
 ```
 
-**Generate — `POST /api/resume/generate`** (feature 08)
+**Generate — `POST /api/resume/generate`** (no request body)
 
 ```
-User clicks Generate
+User clicks Generate, then confirms the replacement
         ↓
-Profile row read from the profiles table
+Profile row read from the caller's own profiles row
         ↓
-GPT-4o writes the resume content
+completeness(profile).isComplete — anything less ends it here
         ↓
-@react-pdf/renderer renders a PDF buffer
+GPT-4o writes the summary and the bullets, validated by zod
+        ↓
+@react-pdf/renderer renders a PDF buffer from those plus the row's own facts
         ↓
 Uploaded to InsForge Storage, overwriting in place
         ↓
 Key saved to profiles.resume_path
 ```
+
+Three properties of this route are load-bearing:
+
+- **It reads the saved row, never the form.** The profile form is routinely ahead of the database —
+  resume extraction exists precisely to put unsaved values on screen — so the Generate button is
+  disabled while the two differ. `ProfileWorkspace` owns that comparison.
+- **Every fact is rendered from the row; the model only writes prose.** Names, companies, titles,
+  dates, degree, institution and skills never pass through GPT-4o. A model that can restate an
+  employer's name can invent one, and a resume is a claim the candidate defends in an interview.
+- **Nothing is written until the PDF exists.** A model failure or a render failure returns without
+  touching storage, so a failed generation always leaves the stored resume intact. This is what
+  makes the overwrite survivable: there is one key, one resume, and no undo.
 
 ---
 
@@ -586,6 +602,9 @@ Rules the AI agent must never violate:
 - The resume object key is always `{user.id}/resume.pdf` derived from the session. No route accepts
   a key, a path, or a user id from the caller — storage has no ownership model to fall back on.
 - Resume extraction never writes to `profiles`. It proposes values; the user saves them.
+- Resume generation reads the saved row, never client-supplied values, and never writes to storage
+  unless a PDF was actually produced.
+- GPT-4o writes prose only. Any fact that appears in a generated document is rendered from the row.
 - Agent code in `/agent` never imports from `/components` or `/actions`.
 - Server Actions never call agent functions. Agent functions are only called from API routes.
 - All InsForge server-side writes use `createInsforgeServer()` — never the browser client.

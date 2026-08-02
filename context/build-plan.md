@@ -155,6 +155,14 @@ Generate a clean professional PDF resume from current profile data using GPT-4o.
 - Buffer uploaded to InsForge Storage at resumes/{user_id}/resume.pdf with upsert: true
 - resume_pdf_url updated in profiles table
 
+> Corrected against features 04 and 08. `resume_pdf_url` does not exist — the column is
+> `resume_path` and it holds an object key, because the bucket is private. `upload()` has no
+> `upsert` option either; writing the same key replaces the object. Two rules the plan does not
+> state were added in feature 08: generation reads the **saved row**, so the button is disabled
+> while the form is ahead of it, and it is gated on `completeness().isComplete` — generating from a
+> thin profile would overwrite a real uploaded resume with a near-empty document.
+> `architecture.md` is authoritative.
+
 ---
 
 ## Phase 3 — Find Jobs Page

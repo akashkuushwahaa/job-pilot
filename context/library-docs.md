@@ -696,21 +696,33 @@ const ResumePDF = ({ profile }: { profile: Profile }) => (
   </Document>
 )
 
-// Generate buffer
+// Generate buffer — renderToBuffer(document) => Promise<Buffer>
 const buffer = await renderToBuffer(<ResumePDF profile={profile} />)
 
-// Upload directly to InsForge Storage
-await insforge.storage
-  .from('resumes')
-  .upload(`${userId}/resume.pdf`, buffer, {
-    contentType: 'application/pdf',
-    upsert: true
-  })
+// upload() takes a File or Blob. There is no third options argument in the
+// installed SDK, and no upsert flag — writing the same key replaces the object.
+const file = new File([new Uint8Array(buffer)], 'resume.pdf', {
+  type: 'application/pdf',
+})
+
+await insforge.storage.from('resumes').upload(`${userId}/resume.pdf`, file)
 ```
 
+> Corrected against the installed packages. This section previously passed the
+> raw buffer to `upload()` with `{ contentType, upsert: true }` — that third
+> argument does not exist in `@insforge/sdk@1.5.1`, whose signature is
+> `upload(path: string, file: File | Blob)`. Verified in
+> `node_modules/@insforge/sdk/dist/client-*.d.ts`.
+
 **Supported CSS properties:**
-Only use these — others are silently ignored:
-`padding, margin, fontSize, color, fontFamily, flexDirection, alignItems, justifyContent, borderRadius, width, height, fontWeight, textAlign, lineHeight`
+The list this file used to carry — `padding, margin, fontSize, color, fontFamily,
+flexDirection, alignItems, justifyContent, borderRadius, width, height,
+fontWeight, textAlign, lineHeight` — is a subset, not the whole surface. The real
+`Style` type is in `node_modules/@react-pdf/stylesheet/lib/index.d.ts` and also
+covers `borderBottomWidth`/`borderBottomColor`, `letterSpacing`, `textTransform`,
+`fontStyle`, `textDecoration`, `flexWrap`, `gap`/`rowGap`/`columnGap`, `flex` and
+the padding/margin long forms. Read that file rather than guessing; anything it
+does not declare is silently ignored at render time.
 
 **Rules:**
 
@@ -718,7 +730,19 @@ Only use these — others are silently ignored:
 - Always use `renderToBuffer` — not `renderToStream` or `PDFDownloadLink`
 - PDF generation only in `app/api/resume/` routes
 - Generated buffer uploaded directly to InsForge Storage — never written to disk
-- Always save public URL to DB after upload
+- **Save the object key to `profiles.resume_path`, never a URL.** The bucket is
+  private; see the Storage section above. This rule previously said "always save
+  public URL", which is the pre-feature-04 assumption
+- **Fonts: use the built-in `Helvetica`.** `Font.register` fetches a font file at
+  render time, inside the request, and embeds it in every document. `ui-tokens.md`
+  governs the app, not a file that leaves it
+- **A PDF has no CSS variables**, so the "never hardcode a hex" rule in
+  `ui-rules.md` cannot apply literally. `lib/resume-pdf.tsx` declares one `COLOR`
+  object holding the `ui-tokens.md` values, named after their tokens — one place
+  to change, still traceable to the design system
+- **Page count is a content budget, not a guarantee.** react-pdf paginates
+  silently rather than refusing to overflow, so single-page output is controlled
+  by capping what goes in (summary length, roles, bullets per role)
 
 ---
 

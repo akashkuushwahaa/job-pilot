@@ -6,12 +6,14 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 2 — Profile Page, in progress
-**Last completed:** 07 AI Profile Extraction from Resume. `POST /api/resume/extract` reads the stored
-PDF, pulls text with pdf-parse, and returns GPT-4o's structured read of it as form values.
-`ProfileWorkspace` now owns the form state both cards write to. Nothing is persisted — the user
-reviews and saves. Exercised against the live model; not yet clicked in a browser — see Notes.
-**Next:** Phase 2 — 08 Resume PDF Generation from Profile.
+**Phase:** Phase 2 — Profile Page, complete
+**Last completed:** 08 Resume PDF Generation from Profile. `POST /api/resume/generate` reads the
+caller's saved row, has GPT-4o write the summary and the bullets, renders them with
+`@react-pdf/renderer` alongside the row's own facts, and uploads the result over the one stored
+resume. Gated on `completeness().isComplete` and on the form matching the saved row, and confirmed
+before it replaces an existing resume. Exercised against the live model end to end; not yet clicked
+in a browser — see Notes.
+**Next:** Phase 3 — 09 Find Jobs Page (Full UI).
 
 ---
 
@@ -29,7 +31,7 @@ reviews and saves. Exercised against the live model; not yet clicked in a browse
 - [x] 05 Profile Page — Full UI
 - [x] 06 Profile Save Logic
 - [x] 07 AI Profile Extraction from Resume
-- [ ] 08 Resume PDF Generation from Profile
+- [x] 08 Resume PDF Generation from Profile
 
 ### Phase 3 — Find Jobs Page
 
@@ -512,12 +514,84 @@ dates as `YYYY-MM`, `currently_working: true` with `end_date: null`, degree draw
 and a non-PDF both returned the build plan's exact "Could not extract text from this PDF" message.
 Anonymous `POST /api/resume/extract` 307s to `/login`.
 
+### Feature 08 — Resume PDF Generation from Profile
+
+Designed through `/architect`. `POST /api/resume/generate` takes **no request body** — the third
+resume route in a row to read the caller's own row rather than accept anything from the client.
+
+Decisions:
+
+- **Overwrite stays, but it is confirmed.** There is one storage key and one `resume_path`, and
+  multiple resume versions are out of scope, so generating destroys the uploaded original — which is
+  also the file extraction reads. With a resume already stored the button does not act: it swaps the
+  row into a Cancel / Replace resume confirm. An inline confirm rather than a dialog, for the same
+  reason feature 05 hand-wrote its primitives — `ui-rules.md` has no dialog and this does not earn a
+  Radix dependency.
+- **Generate is disabled while the form is ahead of the saved row.** Generation reads the row, and
+  the form is routinely ahead of it — extraction exists to put unsaved values on screen. Without
+  this, Extract → Generate silently produces a resume from the *old* row and overwrites the real one
+  with it. `ProfileWorkspace` holds a `savedValues` snapshot and `lib/profile.ts` gained
+  `isSameFormValues`, which compares field by field rather than by `JSON.stringify` — a role reaches
+  the form from `EMPTY_ROLE`, from extraction, and from a jsonb column that orders its keys the way
+  Postgres feels like, so identical roles serialise differently.
+- **Gated on `completeness().isComplete`**, the same ten fields the banner reports, re-checked in the
+  route. A near-empty profile would otherwise render a near-empty PDF over a real uploaded resume.
+  The button carries the reason as muted text — a disabled control that does not say why reads as
+  broken.
+- **GPT-4o writes prose only.** It returns `{ summary, roles: [{ bullets }] }`; every fact — name,
+  company, title, dates, degree, institution, skills — is rendered straight off the row. A model that
+  can restate an employer's name can invent one.
+- **A failure writes nothing.** No upload, no row write, so the stored resume survives a model
+  outage or a render error intact. Failing loudly beats shipping an unpolished PDF over someone's
+  real resume.
+- **Bullets fall back per index, never across roles.** A response with fewer roles than were sent
+  falls back to that role's own `responsibilities` text. Shifting bullets up would attribute one
+  employer's work to another.
+- **`lib/resume-pdf.tsx` lives in `lib/`, not `components/`.** It is not a React DOM component and
+  can never be imported by one; `architecture.md` scopes `components/` to app UI.
+- **No new PostHog event.** The list stays at seven.
+
+Found while building:
+
+- **The InsForge SDK's `upload()` takes `(path, file: File | Blob)` — there is no third options
+  argument.** `library-docs.md` showed `upload(key, buffer, { contentType, upsert: true })`; none of
+  that exists in `@insforge/sdk@1.5.1`. The buffer is wrapped in a `File`, which is what the upload
+  route already passed. **Fourth package in three features whose installed API did not match the
+  docs — read the `.d.ts` first, every time.**
+- **The "supported CSS properties" list for react-pdf was a subset.** The real `Style` type is in
+  `@react-pdf/stylesheet` and includes `borderBottomWidth`, `letterSpacing`, `textTransform`,
+  `flexWrap` and `gap`, all of which this document uses. Corrected.
+- **`@react-pdf/renderer` needed no `serverExternalPackages` entry** — unlike `pdf-parse`, it bundled
+  and rendered clean under Turbopack.
+- **GPT-4o wrote the current role in past tense** despite the rule saying otherwise, because the rule
+  sat in the shared instructions where nothing tied it to a specific role. Marking the role itself
+  `(CURRENT ROLE — write these bullets in present tense)` fixed it on the next run. A rule stated once
+  at the top is weaker than the same rule attached to the item it governs.
+
+**Verified by execution:** a temporary route (since deleted, confirmed 404) ran the real prompt,
+schema, renderer and `pdf-parse` over a complete seven-year profile fixture. Output was a 3.5KB
+`%PDF-1.3` that parses back to **one page** carrying the header, contact line with protocols
+stripped, summary, skills, three roles and education. Dates rendered `Mar 2022 — Present`,
+`Jul 2019 — Feb 2022`, `Jan 2018 — Jun 2019`. The role with empty responsibilities got **zero**
+bullets rather than invented ones. No email address in the extraction sense is irrelevant here —
+the generated resume carries contact details on purpose — but no job preferences, salary expectation
+or work authorization appear anywhere. `tsc`, lint and build clean, every route `ƒ`. Anonymous
+`POST /api/resume/generate` 307s to `/login`.
+
 ---
 
 ## Notes
 
 _Add notes here as the build progresses — workarounds, patterns, anything that differs from the context files._
 
+- **Feature 08 has not run in a browser, and has never run against a real profile row.** Everything
+  verified above went through a fixture in a temporary route. Unexercised: the confirm step, the two
+  disabled states and their reasons, the success banner, `router.refresh()` bringing up
+  `ResumePreview` for a user whose first resume is a generated one, and the whole thing reading an
+  actual `profiles` row. Also unexercised: the per-index bullet fallback, which needs a response
+  carrying fewer roles than were sent.
+- **The first real click of Generate destroys the uploaded resume feature 07 extracts from.** One
+  key, one resume, no undo. Re-upload a copy afterwards if the original is worth keeping.
 - **Feature 05 is UI only, and three controls are deliberately inert.** "Save Profile" submits a form
   whose `onSubmit` calls `preventDefault` (feature 06), "Generate Resume from Profile" has no handler
   (feature 08), and a selected resume file is held in component state and never uploaded (feature 06).
