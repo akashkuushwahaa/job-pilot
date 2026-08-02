@@ -2,29 +2,39 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CloudUpload, FileText } from "lucide-react";
+import { CloudUpload, FileText, Sparkles } from "lucide-react";
 
 import { ResumePreview } from "@/components/profile/ResumePreview";
 import { Button } from "@/components/ui/button";
 import { cn, MAX_RESUME_BYTES } from "@/lib/utils";
+import type { ExtractedFormValues } from "@/types";
 
 const ERROR_MESSAGES = {
   type: "That file is not a PDF. Upload your resume as a PDF.",
   size: "That file is larger than 5MB. Upload a smaller PDF.",
   upload: "Could not upload that resume. Please retry.",
+  extract: "Could not read your resume. Please retry.",
 } as const;
+
+const EXTRACT_SUCCESS =
+  "Fields filled from your resume. Review them, then press Save Profile.";
+
+type ExtractStatus = { kind: "error" | "success"; message: string } | null;
 
 type Props = {
   resumePath: string | null;
+  onExtracted: (values: ExtractedFormValues) => void;
 };
 
-export function ResumeUpload({ resumePath }: Props) {
+export function ResumeUpload({ resumePath, onExtracted }: Props) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractStatus, setExtractStatus] = useState<ExtractStatus>(null);
 
   function resetInput(): void {
     if (inputRef.current) {
@@ -66,6 +76,9 @@ export function ResumeUpload({ resumePath }: Props) {
       }
 
       setIsReplacing(false);
+      // A new file makes any previous extraction notice describe a resume that
+      // is no longer the stored one.
+      setExtractStatus(null);
       // The stored path lives on the server-rendered profile row, so the card
       // only reflects the new file once the page data is refetched.
       router.refresh();
@@ -75,6 +88,37 @@ export function ResumeUpload({ resumePath }: Props) {
     } finally {
       setIsUploading(false);
       resetInput();
+    }
+  }
+
+  // Sends no body. The route reads whichever resume this session's own row
+  // points at, so there is nothing here for a caller to name.
+  async function extractFromResume(): Promise<void> {
+    setExtractStatus(null);
+    setIsExtracting(true);
+
+    try {
+      const response = await fetch("/api/resume/extract", { method: "POST" });
+      // Not re-validated here on purpose. Unlike a database row, this payload
+      // was shaped by lib/resume-extraction's zod schema moments ago and has
+      // been nowhere since — the server is the validator.
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setExtractStatus({
+          kind: "error",
+          message: result.error ?? ERROR_MESSAGES.extract,
+        });
+        return;
+      }
+
+      onExtracted(result.data);
+      setExtractStatus({ kind: "success", message: EXTRACT_SUCCESS });
+    } catch (extractError) {
+      console.error("[profile/ResumeUpload] extract", extractError);
+      setExtractStatus({ kind: "error", message: ERROR_MESSAGES.extract });
+    } finally {
+      setIsExtracting(false);
     }
   }
 
@@ -154,6 +198,43 @@ export function ResumeUpload({ resumePath }: Props) {
         >
           {error}
         </p>
+      ) : null}
+
+      {/* Gated on the stored path rather than on the preview being visible, so
+          the action stays available while a replacement is being chosen — the
+          resume it reads is the saved one either way. */}
+      {resumePath !== null ? (
+        <div className="mt-6 border-t border-border pt-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-text-secondary">
+              Auto-fill the fields below from your saved resume.
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={isExtracting}
+              onClick={() => void extractFromResume()}
+              className="sm:shrink-0"
+            >
+              <Sparkles aria-hidden className="size-4" />
+              {isExtracting ? "Extracting…" : "Extract from Resume"}
+            </Button>
+          </div>
+
+          {extractStatus ? (
+            <p
+              role={extractStatus.kind === "error" ? "alert" : "status"}
+              className={cn(
+                "mt-3 rounded-md border px-3 py-2 text-sm text-text-primary",
+                extractStatus.kind === "error"
+                  ? "border-error/30 bg-error/10"
+                  : "border-success/30 bg-success-lightest",
+              )}
+            >
+              {extractStatus.message}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="mt-6 flex flex-col gap-4 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">

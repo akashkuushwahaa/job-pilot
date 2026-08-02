@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type Dispatch, type SetStateAction } from "react";
 import { Plus } from "lucide-react";
 
 import { saveProfile } from "@/actions/profile";
@@ -10,12 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { toFormValues } from "@/lib/profile";
+import { EMPTY_ROLE } from "@/lib/profile";
 import { cn, MAX_WORK_EXPERIENCE } from "@/lib/utils";
 import {
-  EMPTY_ROLE,
+  DEGREE_OPTIONS,
   type EducationEntry,
-  type Profile,
   type ProfileFormValues,
   type WorkExperienceEntry,
 } from "@/types";
@@ -40,16 +39,6 @@ const REMOTE_PREFERENCE_OPTIONS = [
   { value: "onsite", label: "Onsite" },
 ] as const;
 
-const DEGREE_OPTIONS = [
-  "High School",
-  "Associate",
-  "Bachelor's",
-  "Master's",
-  "PhD",
-  "Bootcamp",
-  "Self-taught",
-] as const;
-
 type SectionProps = {
   title: string;
   action?: React.ReactNode;
@@ -71,17 +60,14 @@ function Section({ title, action, children }: SectionProps) {
 type Status = { kind: "error" | "success"; message: string } | null;
 
 type Props = {
-  profile: Profile | null;
-  email: string;
+  values: ProfileFormValues;
+  setValues: Dispatch<SetStateAction<ProfileFormValues>>;
 };
 
-export function ProfileForm({ profile, email }: Props) {
-  const [values, setValues] = useState<ProfileFormValues>(() => ({
-    ...toFormValues(profile),
-    // Shown disabled and always written from the session — the row's own email
-    // column is only a copy, and on a first save there is no row to copy from.
-    email,
-  }));
+// Controlled by ProfileWorkspace. The values live a level up because the Extract
+// button in the Resume card writes to them too — but everything that interprets
+// them, including adopting what a save normalised, still belongs here.
+export function ProfileForm({ values, setValues }: Props) {
   const [status, setStatus] = useState<Status>(null);
   const [isSaving, startSaving] = useTransition();
 
@@ -115,14 +101,20 @@ export function ProfileForm({ profile, email }: Props) {
     startSaving(async () => {
       const result = await saveProfile(values);
 
-      setStatus(
-        result.success
-          ? { kind: "success", message: "Profile saved." }
-          : {
-              kind: "error",
-              message: result.error ?? "Could not save your profile.",
-            },
-      );
+      if (result.success) {
+        // Adopt what was actually stored — trimmed, comma lists split, blank
+        // roles dropped — so the form shows the row rather than the draft.
+        if (result.values) {
+          setValues(result.values);
+        }
+        setStatus({ kind: "success", message: "Profile saved." });
+        return;
+      }
+
+      setStatus({
+        kind: "error",
+        message: result.error ?? "Could not save your profile.",
+      });
     });
   }
 

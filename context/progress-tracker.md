@@ -7,10 +7,11 @@ Update this file after every completed feature. Any AI agent reading this should
 ## Current Status
 
 **Phase:** Phase 2 — Profile Page, in progress
-**Last completed:** 06 Profile Save Logic. `actions/profile.ts` upserts the row with zod validation,
-`app/api/resume/route.ts` owns resume upload and signed access, and `/profile` now reads the real
-row. `mockProfile()` is gone. Not yet exercised in a browser — see Notes.
-**Next:** Phase 2 — 07 AI Profile Extraction from Resume.
+**Last completed:** 07 AI Profile Extraction from Resume. `POST /api/resume/extract` reads the stored
+PDF, pulls text with pdf-parse, and returns GPT-4o's structured read of it as form values.
+`ProfileWorkspace` now owns the form state both cards write to. Nothing is persisted — the user
+reviews and saves. Exercised against the live model; not yet clicked in a browser — see Notes.
+**Next:** Phase 2 — 08 Resume PDF Generation from Profile.
 
 ---
 
@@ -27,7 +28,7 @@ row. `mockProfile()` is gone. Not yet exercised in a browser — see Notes.
 
 - [x] 05 Profile Page — Full UI
 - [x] 06 Profile Save Logic
-- [ ] 07 AI Profile Extraction from Resume
+- [x] 07 AI Profile Extraction from Resume
 - [ ] 08 Resume PDF Generation from Profile
 
 ### Phase 3 — Find Jobs Page
@@ -415,11 +416,101 @@ Decisions:
   default, so this closes no live leak — it makes the guarantee a property of this repo rather than
   of a library default that can change under us.
 
+### Feature 06 — issues found by `/review` and fixed
+
+All eight findings resolved in the same session.
+
+- **Critical — uploading a resume discarded unsaved form edits.** `ProfileForm` was keyed on
+  `profile.updated_at` so it would re-seed after a save. But the resume upload upserts the same row,
+  the `profiles_updated_at` trigger bumps the column, `router.refresh()` re-renders, the key changes
+  and the form remounts — wiping whatever was part way through being typed. The key conflated "the
+  server has newer canonical data" with "any write touched this row". **`saveProfile` now returns the
+  normalised `values` and the form adopts them itself; the key is gone.** The plan specified that key
+  and it was wrong.
+- **Important — the success banner could never appear.** Same root cause: Next returns the
+  revalidated tree in the Server Action's single-roundtrip response, so the remount reset `status` to
+  null. Errors *did* show, because a failed save never revalidates — silent on success, loud on
+  failure. Fixed by the same change.
+- **Important — three `any` leaks at the database boundaries.** The SDK returns PostgREST rows as
+  `any`, and annotating the variable `Profile | null` only renamed the `any`; nothing was checked. A
+  comment even claimed the shape was "asserted" when it was not. Added `parseProfile(row: unknown)`
+  in `lib/profile.ts` — a zod schema with `.catch()` on every field, so one drifted column degrades
+  to its empty value instead of taking the page down. An absent row returns null; an unrecognisable
+  one throws rather than returning null, because rendering an empty form over a row we failed to read
+  invites the next save to blank it.
+- **Important — a malformed `education` object crashed the profile page.** `hasText` took
+  `string | null` and did `value.trim()`; an education object missing `degree` supplies `undefined`,
+  which sails past a null-only guard and throws. Now `typeof value === "string"`. jsonb is
+  structurally unchecked by Postgres, so nothing upstream guaranteed the shape.
+- **Minor** — `EMPTY_ROLE` / `EMPTY_EDUCATION` moved from `types/` (which `architecture.md` scopes to
+  types) into `lib/profile.ts`; `splitList` un-exported; `GET /api/resume`'s deviation from the
+  route-handler envelope documented in the file; a no-resume `GET` now redirects to `/profile`
+  instead of rendering raw JSON; and the 5MB limit gets a `Content-Length` pre-check so an oversized
+  body is refused before `formData()` buffers it into memory.
+
+**Verified by execution, not reasoning:** a temporary route (since deleted) ran `parseProfile` +
+`completeness` over nine row shapes — absent, healthy, `education` as `[]` / as a string / missing
+`degree`, a role missing keys, `skills: null`, an invalid enum, and `years_experience: "four"`. All
+nine returned rather than threw; the three `education` cases are the ones that previously crashed.
+The healthy row scored 60% with 4 missing, which is the correct 6-of-10.
+
 Verified statically: the three app enums match the DB CHECK constraints character for character;
 `education` is nullable with no default; `GET` and `POST /api/resume` and `/profile` all 307 to
 `/login` for an anonymous caller. That last one also proves `unstable_rethrow` is letting
 `NEXT_REDIRECT` through the route's catch — the proxy matcher excludes `/api`, so the redirect can
 only be coming from `requireUser()` inside the handler.
+
+### Feature 07 — AI Profile Extraction from Resume
+
+Designed through `/architect`. `POST /api/resume/extract` takes **no request body** — it reads
+whichever resume the caller's own row points at, the same rule as the upload route and for the same
+reason.
+
+Decisions:
+
+- **The PDF is downloaded from storage, not re-posted.** The build plan says "uploaded PDF buffer",
+  but the button only exists once `resume_path` is set, so `storage.download(key)` is the shorter
+  path and keeps the key un-nameable by the caller.
+- **Extraction writes nothing.** No `profiles` write, no `revalidatePath`. It returns form-shaped
+  values, the client merges them into React state, and the user presses Save Profile. A page refresh
+  discards a bad extraction entirely — which is what makes overwriting filled fields acceptable.
+- **Merge rule: named fields win, unnamed fields keep what the user typed.** The response carries
+  only keys the resume actually spoke to, so the merge is a spread. `education` merges key by key so
+  a resume naming the institution but not the field of study cannot blank the latter. Work
+  experience replaces the list wholesale — there is no correspondence between "the second role you
+  typed" and "the second role on the resume".
+- **Facts only.** `email`, `work_authorization`, and all four Job Preferences are never extracted.
+  `ExtractedFormValues` in `types/index.ts` `Omit`s them, so the exclusion is enforced by the
+  compiler rather than by discipline.
+- **Form state lifted to `ProfileWorkspace`.** Two cards now write to it. `ProfileForm` is controlled
+  and keeps only `status` and `isSaving`; the page still renders it unkeyed, for the feature 06 reason.
+- **Extraction logic lives in `lib/`, not `agent/`.** No `runId`, no `agent_logs`, one
+  request/response — it does not meet the agent-function contract in `code-standards.md`.
+  `lib/openai.ts` holds the client (matching `browserbase.ts` / `stagehand.ts` / `adzuna.ts`);
+  `lib/resume-extraction.ts` holds prompt, schema and mapping, beside `lib/profile.ts`.
+- **`DEGREE_OPTIONS` moved from `ProfileForm.tsx` to `types/index.ts`.** The prompt, the zod schema
+  and the `<Select>` now read one list — a degree the select cannot render would show as blank.
+- **No new PostHog event.** `code-standards.md` fixes the list at seven.
+
+Found while building:
+
+- **`pdf-parse@2` is not the API `library-docs.md` documented.** The file showed
+  `import pdf from "pdf-parse"; await pdf(buffer)` — that is v1 and does not exist in the installed
+  v2.4.5, which is a `PDFParse` class over pdfjs-dist. It also needs `serverExternalPackages` and a
+  `destroy()` in a `finally` or it leaks a pdfjs worker per call. `library-docs.md` corrected.
+  **Third time in two features that the docs under-described an installed package — read the
+  `.d.ts` first, every time.**
+- **GPT-4o read seven years of experience as four.** "March 2022 — Present" is unresolvable without
+  knowing the present, and the model anchored on its own training cutoff. Fixed by putting today's
+  date in the prompt; re-ran and it returned 7. Recorded as a rule in `library-docs.md`.
+- **`max_tokens` is deprecated in the installed SDK (v7)** in favour of `max_completion_tokens`.
+
+**Verified by execution:** a temporary route (since deleted) ran the real prompt, schema and mapping
+against the live model. A generated one-page resume returned all twelve permitted fields correctly —
+dates as `YYYY-MM`, `currently_working: true` with `end_date: null`, degree drawn from
+`DEGREE_OPTIONS`, `experience_level` a valid enum, no email and no job preferences. A text-free PDF
+and a non-PDF both returned the build plan's exact "Could not extract text from this PDF" message.
+Anonymous `POST /api/resume/extract` 307s to `/login`.
 
 ---
 

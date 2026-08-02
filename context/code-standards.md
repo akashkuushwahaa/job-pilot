@@ -205,6 +205,11 @@ const insforge = await createInsforgeServer();
 - Never use the server client in browser context
 - Always await createInsforgeServer() — it reads cookies asynchronously
 - Always scope every query to the current user_id — never query without a user filter
+- **Rows come back as `any` — parse them, do not annotate them.** `insforge.database.from(...)`
+  returns PostgREST's untyped builder, so `const x: Profile = data` type-checks and verifies nothing:
+  `any` is assignable to anything. Narrow at the boundary with a zod schema, the way
+  `parseProfile` in `lib/profile.ts` does. This matters most for `jsonb` columns, which Postgres does
+  not check structurally at all — a drifted shape reaches the render as `undefined` and throws there.
 
 ---
 
@@ -266,7 +271,7 @@ All environment variables defined in `.env.local` for development. Never hardcod
 | `NEXT_PUBLIC_APP_URL`               | actions/auth.ts                                  |
 | `BROWSERBASE_API_KEY`               | lib/browserbase.ts                               |
 | `BROWSERBASE_PROJECT_ID`            | lib/browserbase.ts                               |
-| `OPENAI_API_KEY`                    | agent/ functions                                 |
+| `OPENAI_API_KEY`                    | lib/openai.ts — the only reader; agent/ imports it |
 | `ADZUNA_APP_ID`                     | lib/adzuna.ts                                    |
 | `ADZUNA_APP_KEY`                    | lib/adzuna.ts                                    |
 | `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` | instrumentation-client.ts, lib/posthog-server.ts |

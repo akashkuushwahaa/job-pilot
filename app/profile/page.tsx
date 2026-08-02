@@ -1,11 +1,10 @@
 import { AppNavbar } from "@/components/layout/AppNavbar";
 import { CompletionIndicator } from "@/components/profile/CompletionIndicator";
-import { ProfileForm } from "@/components/profile/ProfileForm";
-import { ResumeUpload } from "@/components/profile/ResumeUpload";
+import { ProfileWorkspace } from "@/components/profile/ProfileWorkspace";
 import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
 import { createInsforgeServer } from "@/lib/insforge-server";
-import type { Profile } from "@/types";
+import { parseProfile } from "@/lib/profile";
 
 export default async function ProfilePage() {
   const user = await requireUser();
@@ -26,7 +25,7 @@ export default async function ProfilePage() {
     throw new Error("Profile unavailable");
   }
 
-  const profile: Profile | null = data ?? null;
+  const profile = parseProfile(data);
   const { percent, missing, isComplete } = completeness(profile);
 
   return (
@@ -40,14 +39,13 @@ export default async function ProfilePage() {
             missing={missing}
             isComplete={isComplete}
           />
-          <ResumeUpload resumePath={profile?.resume_path ?? null} />
-          {/* Re-seeds form state from the saved row after every successful save —
-              useState's initializer does not re-run on its own. */}
-          <ProfileForm
-            key={profile?.updated_at ?? "new"}
-            profile={profile}
-            email={user.email ?? ""}
-          />
+          {/* Deliberately unkeyed. A key on updated_at remounts the workspace on
+              any write to the row — including a resume upload, which bumps the
+              same column via the updated_at trigger and would discard whatever
+              the user was part way through typing, or a set of fields just
+              extracted. saveProfile returns the normalised values instead, and
+              the form adopts them itself. */}
+          <ProfileWorkspace profile={profile} email={user.email ?? ""} />
         </div>
       </main>
     </>

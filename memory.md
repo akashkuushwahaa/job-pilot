@@ -1,142 +1,123 @@
-# Memory — Feature 05: Profile Page (Full UI) + auth navigation fix
+# Memory — Feature 07: AI Profile Extraction from Resume (built, exercised against the live model)
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
-Phase 1 complete. **Feature 05 is done.** Next is feature 06 — Profile Save Logic.
+Phase 2 is nearly done. Features 05, 06 and 07 complete. Next is feature 08 — Resume PDF Generation.
 
 ## What was built
 
-### Feature 05 — Profile Page, full UI on mock data
-
-Built against `context/designs/profile.png`. No save logic.
-
-- `app/profile/page.tsx` — replaced the `ComingSoon` stub. Holds a `mockProfile()` function returning
-  exactly the design's data; email is real, from `requireUser()`.
-- `components/profile/` — `CompletionIndicator` (banner + SVG ring), `ResumeUpload` (owns the whole
-  Resume card), `ProfileForm` (all five sections, owns form state), `TagInput`, `WorkExperienceCard`.
-- `components/ui/` — six hand-written primitives: `field` (exports `Field` **and** `fieldSurface`),
-  `label`, `input`, `textarea`, `select`, `checkbox`.
-- `lib/completeness.ts` — `completeness(profile)` → `{ percent, missing, isComplete }`.
-- `types/index.ts` — `Profile`, `WorkExperienceEntry`, `EducationEntry` and the three enums.
-- `lib/utils.ts` — added `MAX_WORK_EXPERIENCE` (3) and `MAX_RESUME_BYTES` (5MB).
-- `--color-error-dark: #b42318` added to `globals.css` and `ui-tokens.md`.
-
-### Auth navigation fix (found by `/review`)
-
-- `components/layout/AppNavbar.tsx` — new. Rendered by **all three** protected pages.
-- `app/dashboard/page.tsx`, `app/find-jobs/page.tsx` — now render `AppNavbar` above `ComingSoon`.
-- `components/layout/ComingSoon.tsx` — lost its logo and sign-out to the navbar; it is now just the
-  centred card and is **no longer an Auth shell user** (shell is back to three: login, `error.tsx`,
-  `global-error.tsx`).
-- `components/auth/SignOutButton.tsx` — moved into `AppNavbar`; gained `variant` / `fullWidth` props.
-- `Hero` / `CallToAction` / `app/page.tsx` — new `secondaryHref`; `Navbar` nav collapses at `sm`.
+- **`lib/resume-extraction.ts`** — the whole feature. `extractProfileFromResume(pdf: ArrayBuffer)`
+  returns `{ success, values } | { success: false, error }`. Holds the 200-char text floor, the
+  15,000-char truncation budget, the prompt, the zod schema, and the mapping to form values.
+- **`lib/openai.ts`** — `getOpenAI()` (built on first use, returns null when unconfigured rather than
+  throwing at import) and `OPENAI_MODEL = "gpt-4o"` pinned so no call site writes it inline.
+- **`app/api/resume/extract/route.ts`** — `POST`, **takes no request body**. Reads `resume_path` from
+  the caller's own row, `storage.download`s it, extracts, returns form values. Writes nothing.
+- **`components/profile/ProfileWorkspace.tsx`** — owns `ProfileFormValues`; renders a fragment of
+  `ResumeUpload` + `ProfileForm` so the page's `space-y-6` still applies.
+- Rewired: `ResumeUpload` (Extract button, `isExtracting`, own status banner), `ProfileForm` (now
+  controlled — `values`/`setValues` are props; keeps only `status`/`isSaving`), `app/profile/page.tsx`.
+- `types/index.ts` gained `DEGREE_OPTIONS`/`Degree` (moved out of `ProfileForm.tsx`) and
+  `ExtractedFormValues`.
+- `openai@7.3.0` and `pdf-parse@2.4.5` installed. `next.config.ts` gained
+  `serverExternalPackages: ["pdf-parse"]`.
 
 ## Decisions made
 
-- **The shadcn CLI was still not run, deliberately.** Feature 05 needs no dialog, and its select and
-  checkbox are native elements. `shadcn init` would rewrite `globals.css` with its own palette. All
-  primitives are hand-written in shadcn's shape on project tokens, as `Button` was. Revisit only when
-  a page genuinely needs a dialog or combobox.
-- **`completeness()` reads exactly ten fields** — design-locked. 70% with PHONE/LOCATION/EDUCATION
-  missing is only self-consistent at ten. Listed in `architecture.md`. Takes `Profile | null`.
-- **Filled inputs tint, empty ones stay white, and the tint inverts against its container.** `Input`
-  reads its own `value`. Inside the grey `WorkExperienceCard`, inputs are forced back to `bg-surface`.
-- **`--color-error` is a signal colour, not a text colour.** Red that is read uses `text-error-dark`.
-- **Every protected page must render `AppNavbar`** — now an invariant in `architecture.md`. There is
-  no shared authenticated layout and no `(app)` route group; pages own their chrome.
-- **Sign-out lives in `AppNavbar`** — the feature-14 plan executed early, because feature 05 deleted
-  `/profile`'s use of `ComingSoon` and took the app's only sign-out on that page with it.
-- **Focus states are split on purpose:** `focus-visible:` on anything clicked, plain `focus:` on
-  `fieldSurface` text controls.
+- **The PDF is downloaded from storage, never re-posted.** The build plan said "uploaded PDF buffer",
+  but the button only exists once `resume_path` is set. The route accepts no key, path or user id
+  from the caller — storage still has no ownership model, so this is the only defence.
+- **Extraction writes nothing.** No `profiles` write, no `revalidatePath`. A page refresh discards a
+  bad extraction entirely, and that is what makes overwriting filled fields safe.
+- **Merge rule: named fields win, unnamed fields keep what the user typed.** The response carries only
+  keys the resume spoke to, so the merge is a spread. `education` merges key by key; work experience
+  replaces the list wholesale.
+- **Facts only.** `email`, `work_authorization` and all four Job Preferences are never extracted.
+  `ExtractedFormValues` `Omit`s them, so the compiler enforces it rather than discipline.
+- **Extraction lives in `lib/`, not `agent/`.** No runId, no `agent_logs`, one request/response — it
+  does not meet the agent-function contract.
+- **Form state lifted to `ProfileWorkspace`** because two cards now write to it. The page still
+  renders it unkeyed, for the feature 06 reason.
+- **No new PostHog event.** The list stays at seven.
 
 ## Problems solved
 
-- **"Cannot reach /profile after login" was never an auth bug.** `/dashboard` rendered the
-  chrome-less `ComingSoon`, whose only links were the logo and Sign out — nothing pointed at
-  `/profile`. The homepage navbar had the links but was `hidden md:flex`, so under 768px there was no
-  route to `/profile` from anywhere. Fixed by `AppNavbar` on every protected page plus an `sm`
-  breakpoint. Sign-in itself was working the whole time; the dev log had zero auth errors.
-- **Both homepage "Find your first match" buttons pointed at `ctaHref`**, so signed in all four
-  homepage buttons went to `/dashboard` and the secondary label was a lie. Only the *primary* CTA had
-  ever been session-aware.
-- **Verifying auth-gated UI without a session:** write a temporary unauthenticated preview route,
-  `curl` it, grep the markup, delete the route. Used twice. Also worth grepping
-  `.next/static/chunks/*.css` for new utility classes — Tailwind drops unknown ones silently and the
-  build still passes.
-- **PostHog browser events are readable from `.next/dev/logs/next-development.log`.** Mark the line
-  count before a manual browser pass, then `tail -n +N` and grep event names, `provider`,
-  `$anon_distinct_id` and `$current_url` afterwards.
+- **`pdf-parse@2` is not the API `library-docs.md` documented.** The docs showed
+  `import pdf from "pdf-parse"; await pdf(buffer)` — that is v1 and does not exist in the installed
+  v2.4.5, which is a `PDFParse` class over pdfjs-dist: `new PDFParse({ data })` → `getText()` →
+  `.text`. It needs `serverExternalPackages` and an `await parser.destroy()` in a `finally` or it
+  leaks a pdfjs worker per call. `library-docs.md` corrected. **Third time in two features that an
+  installed package did not match its documentation — read the `.d.ts` first, every time.**
+- **GPT-4o read seven years of experience as four.** "March 2022 — Present" is unresolvable without
+  knowing the present, and the model anchored on its own training cutoff. Fixed by putting today's
+  date in the prompt; re-ran and it returned 7. **Every dated GPT-4o call in features 10 and 13 will
+  hit this** — the rule is now in `library-docs.md`.
+- **`max_tokens` is deprecated in openai v7** in favour of `max_completion_tokens`.
+- **`json_object` only guarantees valid JSON for a response that completed.** Hitting the token
+  ceiling truncates mid-object and `JSON.parse` throws, so `finish_reason === "length"` is logged
+  separately to tell a truncation from a malformed response.
 
 ## Current state
 
-- `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean. Every route dynamic (`ƒ`).
-  All three protected routes still 307 to `/login` while signed out.
-- **Branch `feat/04-database-schema`** — the name is stale, it now carries all of feature 05 and the
-  auth fix. All code is committed through `689d2bb`. Only `context/progress-tracker.md` and
-  `context/ui-registry.md` are dirty (this session's `/review` and `/imprint` notes).
-- **Browser pass done, 2026-08-01, two full GitHub sign-in cycles.** Confirmed from the dev log:
-  route trail `/login → /dashboard → /profile → /find-jobs → /`; `oauth_sign_in_started` ×2 with
-  `provider: "github"` (first time that provider has ever run); `$identify` ×2 with distinct
-  `$anon_distinct_id`s merging into one identified id; `user_signed_out` ×3; **zero server-side
-  errors**. From autocapture: the checkbox toggled, tag Add clicked ~5×, a chip `×` clicked ~2×.
-- `ui-registry.md` is at 30 entries and was drift-checked across `components/` and `app/`: zero hex
-  values, zero raw Tailwind colour classes, every value a token.
+- `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean. Every route `ƒ`.
+  `/api/resume/extract` is registered and 307s to `/login` anonymously.
+- **Feature 07 exercised against the live model.** A temporary route (since deleted, confirmed 404)
+  ran the real prompt, schema and mapping over a generated one-page resume: all twelve permitted
+  fields correct — dates `YYYY-MM`, `currently_working: true` with `end_date: null`, degree from
+  `DEGREE_OPTIONS`, valid `experience_level` enum, no email, no job preferences. A text-free PDF and
+  a non-PDF both returned the build plan's exact "Could not extract text from this PDF" message.
+- **Nothing in feature 07 has been clicked in a browser.** The UI wiring — button, loading state,
+  merge into form state, status banner — is reasoned but unobserved.
+- Branch is still **`fix/06-profile-save-review`**. Feature 07 is uncommitted; feature 06 is
+  committed through `24c4ee9`. Neither is merged to `main` (`main` was merged in via PR #1).
 
 ## Next session starts with
 
-1. **Feature 06 — Profile Save Logic.** Delete `mockProfile()` from `app/profile/page.tsx` and read
-   the real row. **Handle a missing row** — there is none until first save; pass `null` straight to
-   `completeness()`. Wire `actions/profile.ts`, upload to `resumes/{user_id}/resume.pdf` with
-   `upsert: true`, store the object **key** in `resume_path`, and render links with
-   `createSignedUrl(path, 3600)` at render time. `job_titles_seeking` and `preferred_locations` are
-   entered as one comma-separated field and must be split into `text[]` on save. Re-validate PDF type
-   and size on the server — `ResumeUpload`'s checks are cosmetic.
-2. **Decide session replay before wiring the save.** See open questions — this is the blocking one.
-3. Consider renaming or merging the `feat/04-database-schema` branch before more work lands on it.
+1. **Click through feature 07 in a browser, in this order:** type into a field → press Extract →
+   confirm the typing survives. That finally puts eyes on the feature 06 remount fix, which
+   extraction now stresses directly. Then extract onto a full profile to watch the overwrite rule,
+   refresh without saving to confirm the stored row is untouched, and save afterwards.
+2. **Commit feature 07** (branch per feature: `feat/07-ai-profile-extraction` off main, or continue on
+   the current branch and decide the merge).
+3. **Feature 08 — Resume PDF Generation from Profile.** `POST /api/resume/generate`: GPT-4o writes
+   the content at temperature 0.7 / 1000 tokens, `@react-pdf/renderer` renders it with
+   `renderToBuffer()`, uploaded over `{user.id}/resume.pdf`. `@react-pdf/renderer` is not installed
+   yet. Note the build plan's feature 08 text still says `resume_pdf_url` — that column does not
+   exist; it is `resume_path` and it holds a key. `lib/openai.ts` and the extraction module are the
+   patterns to follow.
 
 ## Open questions
 
-**Blocking feature 06:**
+**Feature 07, unverified:**
 
-- **Session replay is recording the profile form and nobody decided that.** 49 `$snapshot` events in
-  the browser pass. It is on because `instrumentation-client.ts` sets `defaults: "2026-01-30"`;
-  nothing in the context files mentions it. Today it captures mock data — from feature 06 it captures
-  real phone numbers, locations, salary expectations and work history as they are typed. Turn it off,
-  configure PostHog input masking, or accept it explicitly and record the decision.
+- **The whole UI is unobserved** — see "Next session starts with".
+- **A real-world resume has never been through it.** Only a generated single-column PDF. Multi-column
+  layouts and heavy formatting are where pdf-parse's text order gets scrambled.
+- **The 800-token ceiling is tight** for three roles with responsibilities. `finish_reason === "length"`
+  is logged; if it ever appears, raise the ceiling and update `library-docs.md` rather than diverging.
 
-**Auth findings from `/review`, reported and not fixed:**
+**Carried forward from feature 06, still open:**
 
-- **The `unstable_rethrow` invariant is violated in three catches** — `startOAuth` and `clearSession`
-  in `actions/auth.ts`, and the outer catch in `app/api/auth/callback/route.ts`. `redirect()` sits
-  outside the try in both actions so `NEXT_REDIRECT` is not currently swallowed, but `cookies()`
-  inside those blocks can raise Next control-flow exceptions.
-- The OAuth code-verifier cookie is not deleted when the exchange fails — stale for up to 10 minutes.
-- Signed-out visitors see the homepage app-nav links, which 307 straight back to `/login`.
-
-**Still unverified:**
-
-- **Neither error boundary has ever rendered.** Zero `$exception` events. Throw something on purpose.
-- **Server-side `user_signed_in` has never been confirmed arriving** — it goes via `posthog-node` so
-  it never reaches the browser log. Needs PostHog's Activity view; the `phc_` token is write-only.
-- **Google OAuth has not run since the feature-03 fixes** — both browser cycles were GitHub.
-- **`ResumeUpload` drag-and-drop and "Add role" are still unexercised** — no distinguishable trace in
-  autocapture.
-- **Cross-user RLS isolation is still unproven** — `auth.users` holds one user and admin tooling
-  refuses `SET ROLE`. Needs a genuine second signed-in account.
-
-**Carried forward:**
-
-- **Rotate the InsForge admin API key** if it was ever committed, pushed or deployed. The `ik_`
-  full-access key had been pasted into `NEXT_PUBLIC_INSFORGE_ANON_KEY` and served to browsers before
-  being replaced with the correct `anon_` key.
+- **The comma-separated → `text[]` split has never run.** `job_titles_seeking` and
+  `preferred_locations` are both empty in the saved row. Extraction deliberately leaves them alone,
+  so this still needs typing two titles manually and checking the column is a two-element array.
+- **`profile_completed` has not been confirmed arriving.** Goes through `posthog-node` and never
+  reaches the browser log — needs PostHog's Activity view. Also confirm it does not fire twice.
+- **Server-side upload rejection is untested.** `curl -F` a non-PDF and a >5MB file at `/api/resume`
+  with a session cookie, bypassing the cosmetic client checks.
+- **Neither error boundary has ever rendered.** Zero `$exception` events.
+- **Google OAuth has not run since the feature-03 fixes** — the last sign-ins were GitHub.
+- **Cross-user isolation is unproven for both RLS and storage.** One user exists and admin tooling
+  refuses `SET ROLE`. Storage has no ownership model, so `/api/resume` and `/api/resume/extract` are
+  the only enforcement — worth a real test the moment a second account exists.
+- **Rotate the InsForge admin API key** if it was ever committed, pushed or deployed. The full-access
+  key had been pasted into the public anon-key variable and served to browsers before being replaced.
+- **Input masking has not been confirmed in an actual recording.**
 
 **Small, worth doing when convenient:**
 
 - `Button` size `md` is `h-9` but form controls are `h-10`, so any button on a field row needs an
-  explicit `h-10` override (TagInput's Add does). Consider making `md` `h-10` when feature 09 builds
-  the search controls rather than overriding per site.
-- `ResumePreview.tsx` is listed in `architecture.md` but not built — it lands with feature 06's
-  signed-URL render.
-- `build-plan.md` feature 06 still says `resume_pdf_url`, `is_complete`, and "completion percentage
-  and missing fields calculated and saved". All three are wrong — feature 04 dropped them. The column
-  is `resume_path` and completeness is derived. `architecture.md` is the correct one.
+  explicit `h-10`. Consider making `md` `h-10` when feature 09 builds the search controls.
+- "Generate Resume from Profile" is still inert — feature 08.
+- `tailwindcss@^4` is installed despite `AGENTS.md` saying to lock 3.4. Nothing has broken, but the
+  instruction and the lockfile disagree.

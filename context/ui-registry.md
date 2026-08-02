@@ -484,9 +484,9 @@ score badges. These are a checklist, and the design draws them square-ish.
 ### ResumeUpload — `components/profile/ResumeUpload.tsx`
 
 File: `components/profile/ResumeUpload.tsx`
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
-Owns the whole Resume card, not just the dropzone: heading, dropzone, divider, generate row.
+Owns the whole Resume card, not just the dropzone: heading, dropzone, extract row, generate row.
 
 | Element         | Class                                                                                     |
 | --------------- | ----------------------------------------------------------------------------------------- |
@@ -502,6 +502,23 @@ Takes `resumePath: string | null`. With no resume it shows the dropzone; with on
 `ResumePreview` and swaps back to the dropzone while `isReplacing`. Selecting a file uploads
 immediately to `POST /api/resume`, then `router.refresh()` — the stored path lives on the
 server-rendered row, so the card only updates once the page data is refetched.
+
+**Footer row recipe — one shape, used twice.** Both the extract row and the generate row are
+`mt-6 flex flex-col gap-4 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between`:
+explanatory `text-sm text-text-secondary` on the left, an icon + label button on the right with
+`sm:shrink-0`. Any future "here is an action related to this card" row uses the same one.
+
+The extract row renders only when `resumePath !== null` — including while a replacement is being
+chosen, since the resume it reads is the saved one either way. Its button is
+`variant="secondary"` with a `Sparkles` icon, and it swaps its label to "Extracting…" while
+`isExtracting` rather than showing a spinner, matching the dropzone's "Uploading…" and
+`ProfileForm`'s "Saving…".
+
+**Status banner recipe — shared with `ProfileForm`.** `mt-3 rounded-md border px-3 py-2 text-sm
+text-text-primary`, then `border-error/30 bg-error/10` or `border-success/30 bg-success-lightest`,
+with `role="alert"` on error and `role="status"` on success. Upload errors and extract status are
+deliberately separate state rendered in separate slots — each message sits next to the control that
+produced it.
 
 ### ResumePreview — `components/profile/ResumePreview.tsx`
 
@@ -601,7 +618,7 @@ role exists. Add role without remove is a dead end.
 ### ProfileForm — `components/profile/ProfileForm.tsx`
 
 File: `components/profile/ProfileForm.tsx`
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 | Property         | Class                                                       |
 | ---------------- | ----------------------------------------------------------- |
@@ -616,7 +633,8 @@ Last updated: 2026-08-01
 | Accent usage     | `text-accent` on Add role; primary Save button              |
 
 **Pattern notes:**
-One client component owning all form state, on the card recipe. Five sections in a `space-y-8`
+A controlled client component on the card recipe — `values` and `setValues` come from
+`ProfileWorkspace`; only `status` and `isSaving` are local. Five sections in a `space-y-8`
 stack; each is a module-local `Section` — `border-t border-border pt-8`, heading
 `text-sm font-semibold text-text-primary`, optional `action` node on the right (that is "+ Add role").
 
@@ -634,11 +652,36 @@ success:  rounded-md border border-success/30 bg-success-lightest px-3 py-2 text
 
 Body copy stays `text-text-primary` in both, for the same contrast reason as the login banner.
 
-`email` comes in as its own prop, not from the profile row — on a first save there is no row to read
-it from, and the field is disabled because the server always writes the session's address.
+`email` is pinned by `ProfileWorkspace`, not read from the profile row — on a first save there is no
+row to read it from, and the field is disabled because the server always writes the session's address.
+
+**Never key this component on `updated_at`.** It was, so that a save would re-seed state from the
+canonical row — but a resume upload writes the same row, the `updated_at` trigger fires,
+`router.refresh()` remounts the form and everything typed so far is gone. It also reset the status
+banner, so a successful save showed nothing. `saveProfile` returns the normalised values and the form
+adopts them with `setValues`; there is no key.
 
 Card heading (`Profile Information`) is `text-base font-semibold`; section headings inside it are
 `text-sm font-semibold`. Two levels, matching the type scale — app pages never depart from it.
+
+### ProfileWorkspace — `components/profile/ProfileWorkspace.tsx`
+
+File: `components/profile/ProfileWorkspace.tsx`
+Last updated: 2026-08-02
+
+Renders no markup of its own — a fragment holding `ResumeUpload` and `ProfileForm`, so the profile
+page's `space-y-6` still applies to both cards as direct children.
+
+**Pattern notes:**
+It exists because two cards write to one piece of state: the form's own inputs, and the Extract
+button over in the Resume card. This is the lowest node owning both, which is where the state
+belongs. Reach for this shape — a stateful, markup-free parent — rather than context, whenever the
+two consumers are already adjacent in the tree.
+
+The merge is a spread: extraction returns only the keys the resume spoke to, so named fields win and
+unnamed fields keep whatever the user typed. `education` merges key by key rather than wholesale.
+Nothing is persisted by any of it — a page refresh restores the saved row, which is what makes
+overwriting filled fields safe.
 
 ### Profile page — `app/profile/page.tsx`
 

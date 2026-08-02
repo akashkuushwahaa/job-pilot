@@ -92,10 +92,12 @@
 │   │   ├── RecentActivity.tsx
 │   │   └── AnalyticsCharts.tsx
 │   ├── profile/
-│   │   ├── ProfileForm.tsx                  → All five form sections; owns form state
+│   │   ├── ProfileWorkspace.tsx             → Owns form state; the node both cards write to
+│   │   ├── ProfileForm.tsx                  → All five form sections; controlled by the workspace
 │   │   ├── TagInput.tsx                     → Skills and industries chip input
 │   │   ├── WorkExperienceCard.tsx           → One role's fields
-│   │   ├── ResumeUpload.tsx                 → The whole Resume card, not just the dropzone
+│   │   ├── ResumeUpload.tsx                 → The whole Resume card — upload, preview, extract
+│   │   ├── ResumePreview.tsx                → The stored-resume row: filename, View, Replace
 │   │   └── CompletionIndicator.tsx          → Attention banner + completion ring
 │   ├── find-jobs/
 │   │   ├── SearchControls.tsx
@@ -117,9 +119,11 @@
 │   ├── stagehand.ts                       → Stagehand initialisation with Browserbase session
 │   ├── adzuna.ts                          → Adzuna API client
 │   ├── posthog-server.ts                  → captureServerEvent — server-side PostHog capture
+│   ├── openai.ts                          → OpenAI client instance + the pinned model string
+│   ├── resume-extraction.ts               → PDF text + GPT-4o prompt, schema, and form mapping
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
-│   ├── profile.ts                         → Both directions of the profiles row <-> form mapping
+│   ├── profile.ts                         → parseProfile + both directions of the row <-> form mapping
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -194,18 +198,55 @@ Page data revalidated
 
 ### Resume Operations (API Routes)
 
+Three routes, and only two of them write. The object key is never accepted from the
+client in any of them — it is always derived from the session. A private InsForge
+bucket means "requires authentication", not "requires ownership", so these routes are
+the only thing separating one user's resume from another's.
+
+**Upload — `POST /api/resume`**
+
 ```
-User uploads resume or clicks Generate
+User selects a PDF
         ↓
-API route in app/api/resume/
+Uploaded to resumes/{user_id}/resume.pdf
         ↓
-GPT-4o processes content
+Key saved to profiles.resume_path (and nothing else on the row)
+```
+
+**Extract — `POST /api/resume/extract`** (no request body)
+
+```
+User clicks Extract from Resume
         ↓
-@react-pdf/renderer renders PDF buffer
+resume_path read from the caller's own row
         ↓
-New PDF uploaded to InsForge Storage
+PDF downloaded from InsForge Storage
         ↓
-URL saved to profiles table
+pdf-parse extracts raw text — too little text ends it here
+        ↓
+GPT-4o returns structured JSON, validated by zod
+        ↓
+Form-shaped values returned to the browser
+        ↓
+ProfileWorkspace merges them into form state
+        ↓
+Nothing is persisted. The user reviews and presses Save Profile.
+```
+
+**Generate — `POST /api/resume/generate`** (feature 08)
+
+```
+User clicks Generate
+        ↓
+Profile row read from the profiles table
+        ↓
+GPT-4o writes the resume content
+        ↓
+@react-pdf/renderer renders a PDF buffer
+        ↓
+Uploaded to InsForge Storage, overwriting in place
+        ↓
+Key saved to profiles.resume_path
 ```
 
 ---
@@ -538,6 +579,13 @@ await stagehand.close();
 Rules the AI agent must never violate:
 
 - API routes contain no UI logic. Components contain no DB logic.
+- Every `profiles` row read goes through `parseProfile()` — never annotate an SDK result as a typed
+  row, because `any` is assignable to anything and the annotation checks nothing.
+- Every GPT-4o response is validated with zod before use, for the same reason. A model response is
+  untrusted input, not a typed object.
+- The resume object key is always `{user.id}/resume.pdf` derived from the session. No route accepts
+  a key, a path, or a user id from the caller — storage has no ownership model to fall back on.
+- Resume extraction never writes to `profiles`. It proposes values; the user saves them.
 - Agent code in `/agent` never imports from `/components` or `/actions`.
 - Server Actions never call agent functions. Agent functions are only called from API routes.
 - All InsForge server-side writes use `createInsforgeServer()` — never the browser client.
