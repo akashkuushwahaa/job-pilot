@@ -122,6 +122,27 @@ export type JobListItem = {
   found_at: string;
 };
 
+// The Find Jobs filter bar. Both the client component that renders the selects
+// and the server read that applies them work from these two lists, so an option
+// the query cannot honour cannot be rendered in the first place.
+export const JOB_MATCH_FILTERS = ["all", "high", "low"] as const;
+
+export type JobMatchFilter = (typeof JOB_MATCH_FILTERS)[number];
+
+export const JOB_SORTS = ["score", "newest", "oldest"] as const;
+
+export type JobSort = (typeof JOB_SORTS)[number];
+
+// The whole state of the Find Jobs list. It lives in the URL rather than in
+// component state, so a refresh, the back button and a shared link all reproduce
+// the same list — and the read stays in the Server Component that renders it.
+export type JobQuery = {
+  text: string;
+  match: JobMatchFilter;
+  sort: JobSort;
+  page: number;
+};
+
 // What resume extraction is allowed to hand back. The omissions are the point:
 // email comes from the session, and work authorization and the four job
 // preferences are things a resume does not state — filling them would mean
