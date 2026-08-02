@@ -1,126 +1,155 @@
-# Memory — Feature 11: Filter + Sort + Pagination (built, uncommitted, never run in a browser)
+# Memory — Feature 12: Job Details Page (shipped, reviewed, fixed)
 
 Last updated: 2026-08-02
 
-Phase 3 is complete. Features 01–11 done. Next is feature 12, Job Details Page — which also adds
-the row `href` the jobs table has been waiting for since feature 09.
+Phase 4 is half done. Features 01–12 are complete and **merged to `main`**. Next is feature 13,
+Company Research Agent — which wires the Research Company button feature 12 shipped inert **and**
+backfills the job description (see the Feature 13 note in `build-plan.md`; it is not optional).
 
-**Read this first: feature 11 is uncommitted, and it is sitting on the feature-10 branch.** See Git
-under Current state before doing anything else.
+Feature 12 has now had a `/review` pass and a partial browser pass. Nine findings were fixed, plus a
+tenth raised from the browser. See "Review fixes" below — several are rules, not one-off patches.
 
 ## What was built
 
-Feature 11 wires the filter bar, both sorts, the text filter and every pagination control to the
-`jobs` read. No new components — feature 09 wrote the option values as the filter and sort keys
-precisely so this feature would only add behaviour.
+`/find-jobs/[id]` — the whole job rendered from its `jobs` row. Zero Client Components; everything is
+static or a `Link`.
 
-- **`lib/jobs.ts`** — gained `JOBS_PAGE_SIZE`, `parseJobQuery`, `jobsHref`, `toMatchFilter`,
-  `toJobSort`, a module-private `quoteFilterValue` / `readJobPage`, and the exported `fetchJobPage`.
-  It now owns URL parsing, link building and the filtered/sorted/paged read.
-- **`types/index.ts`** — added `JOB_MATCH_FILTERS`, `JOB_SORTS`, `JobMatchFilter`, `JobSort`,
-  `JobQuery`.
-- **`components/find-jobs/JobFilters.tsx`** — now a Client Component. Markup unchanged; it gained a
-  `query` prop and three handlers.
-- **`components/find-jobs/JobsPagination.tsx`** — still a Server Component. Takes
-  `query` / `totalResults`; `pageSize` is gone as a prop. Module-local `PageControl` renders a
-  `Link` when there is somewhere to go and a disabled `Button` when there is not.
-- **`components/find-jobs/JobsTable.tsx`** — takes `filtered` and swaps the empty-state sentence.
-- **`app/find-jobs/page.tsx`** — takes `searchParams`, calls `parseJobQuery` then `fetchJobPage`,
-  and folds the *resolved* page back into one `listQuery` both controls receive.
-- Docs updated: `progress-tracker.md`, `architecture.md`, `ui-registry.md`, `build-plan.md`
-  (feature 11 correction note).
+- **`app/find-jobs/[id]/page.tsx`** — new. `max-w-4xl` reading column (following `/profile`, not the
+  1440px container `/find-jobs` uses), a Back to Jobs link, then a `space-y-6` stack of five cards.
+- **`components/job-details/`** — new folder, five components matching `architecture.md` name for
+  name: `JobInfo` (header card + the four fact cards, as one fragment), `MatchScore` (AI reasoning
+  card + skills card), `JobDescription`, `CompanyResearch`, `JobActions`.
+- **`lib/jobs.ts`** — gained `JOB_DETAIL_COLUMNS`, a module-private `JobDetailSchema` and the
+  exported `fetchJob`.
+- **`lib/utils.ts`** — gained `matchBadge` and `formatJobType`.
+- **`types/index.ts`** — gained `JobDetail`.
+- **`components/find-jobs/JobsTable.tsx`** — the row `href` feature 09 left out has landed.
+- Docs updated: `progress-tracker.md`, `ui-registry.md`, `architecture.md`, `build-plan.md`
+  (feature 12 correction note).
 
 ## Decisions made
 
-- **All four controls live in the URL** — `?q=&match=&sort=&page=` — not in component state. Keeps
-  the read in the Server Component (`code-standards.md` forbids fetching in a Client Component) and
-  makes refresh, back and a shared link reproduce the same list. The alternative would have put a
-  second copy of the query in the browser for the server's to drift from.
-- **Every sort ends with `id`, and it is load-bearing.** `found_at` defaults to `now()`, which is
-  *transaction* time, so all ten rows of one discovery run share a millisecond — verified against
-  the live table. Score ties are just as common. Without a unique final key a paged read repeats one
-  row and drops another.
-- **Filter text is double-quoted before it reaches PostgREST's `or()`.** Verified both directions —
-  see Problems solved.
-- **The default sort is Match Score**, matching what the select has displayed since feature 09.
-  Feature 10's read was newest-first, so the visible ordering changed with this feature.
-- **A `?page=` past the end is clamped**, costing one extra round trip only when the first read came
-  back empty against a non-zero total. The controls always get the resolved page, never the
-  requested one.
-- **The empty state has two sentences.** "No jobs yet, go and search" is wrong for someone whose
-  jobs a filter is hiding. No CTA — the filter bar is directly above and is itself the way out.
-- **Selects controlled, text input not.** A controlled `<select>` re-renders in place and stays in
-  step with the URL for free. The text input keeps `defaultValue` and is never re-seeded: its 300ms
-  debounced `replace` lands while the user is still typing, so a value fed back from the server
-  would race the keyboard and drop characters. **Do not "fix" this into a controlled input.**
-- **Filters `replace`, pagination `push`es.** A history entry per keystroke turns back into a way to
-  un-type; paging is a step a user does expect to walk back.
+- **The match badge is not the match bar, and the two must stay separate functions.** `matchBadge()`
+  keys on `MATCH_THRESHOLD` (70) per `ui-tokens.md`'s Status Badges table; `matchScoreFill()` keys on
+  the design's 90/80 bands. That is why the design draws an 85% badge *green* while an 85 bar is
+  *blue*. They answer different questions — "did it clear the bar" vs "where in the range does it
+  sit". **Do not collapse them.**
+- **Missing skills are purple, not red.** `build-plan.md` said "red/orange badges"; `ui-tokens.md`
+  and the design both say `bg-accent-muted` / `text-accent`. Two sources beat one, and a gap skill is
+  what feature 13 turns into a strategy, not an error. The plan was corrected.
+- **`company_research` is not selected by the read at all.** Feature 12 draws the empty state only.
+  Feature 13 must add the column to the select, the dossier markup and the button handler *together*
+  — otherwise there is a window where the card reports "No research yet" over a dossier that exists.
+- **The Research Company button is inert.** Same full-UI-then-wire split features 09 and 10 made on
+  Find Jobs. The design draws it active and the empty-state copy tells the user to click it, so it is
+  not disabled; it is documented instead.
+- **Every section renders only if it has content, and whole cards can return `null`.** No
+  `match_reason` → no reasoning card. Both skill arrays empty → no skills card. Nothing in any
+  description column → no Job Description card. Feature 10 warned this page would be thinner than the
+  design; the honest way to be thinner is to render less, not to render empty headings.
+- **A malformed id is a 404, not an error page.** `fetchJob` shape-checks the uuid before querying.
+  A missing row returns null → `notFound()`; a read failure or an unparseable row throws.
+- **The row link is one link, not five.** A `<tr>` cannot wrap an `<a>`, so the company name is the
+  link with `before:absolute before:inset-0` stretching it over a `relative` row. Accessible name is
+  "Company — Title" via an `sr-only` span. The focus ring moved onto the pseudo-element, because
+  `focus-within:bg-surface-secondary` is a 1.04:1 change and is not a focus indicator.
+- **An absent fact is `—` plus an `sr-only` "Not stated".** An em dash alone is announced as
+  "em dash", and with `job_type` null on every row this is the common case, not the edge one.
 - No new PostHog event. Still seven.
 
 ## Problems solved
 
-- **PostgREST's `or()` argument is parsed by PostgREST itself**, so an unquoted comma, dot or
-  parenthesis in filter text is read as syntax and fails the whole request — and this page treats a
-  read failure as fatal, so it would be a blank page, not a bad result. **This user's own rows
-  include a company called "SimVentions, Inc - Glassdoor ✪ 4.6".** Proved both directions through a
-  temporary route: six awkward strings all reached `42501 permission denied` (so they parsed), while
-  the same text unquoted returned `PGRST100 failed to parse logic tree`.
-- **A `PostgrestError` logs as literally `{}`** in `.next/dev/logs/next-development.log`, despite
-  carrying `code` / `details` / `hint` / `message`. `readJobPage` now logs `error.code` and
-  `error.message` by name. **Do not trust a log line that prints a whole SDK error object.**
-- **The MCP `run-raw-sql` tool rejects CTEs with `UNION ALL`** ("could not be parsed and was
-  rejected for security reasons"). Use several simple queries with `count(*) FILTER (WHERE …)`.
+- **PostgREST answers a malformed uuid with `22P02 invalid input syntax for type uuid`**, which
+  arrives as a *read failure* — so a hand-typed `/find-jobs/nope` would have rendered the error
+  boundary instead of a 404. Reproduced accidentally by passing a non-uuid `user_id` during
+  verification. The id guard in `fetchJob` is what prevents it.
+- **Tailwind escapes colons in the emitted selector.** A grep for `before:content-['']` and
+  `focus-visible:before:ring-accent` reported them missing from the CSS; the real selectors are
+  `.before\:content-\[\'\'\]` and `focus-visible\:before\:ring-accent`, and all ten new classes were
+  present. **Check the escaping before concluding Tailwind dropped a class.**
+- **JSX collapses a newline into a space.** `{company}` on one line and `&apos;s` on the next
+  rendered "Marlabs LLC 's". Caught by reading the markup back, not by review.
 
 ## Current state
 
-- `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean. Every route `ƒ`. The temporary
-  verification route was deleted and confirmed 404.
-- **Verified by execution, without a session:** `parseJobQuery` over eight hostile inputs (unknown
-  enums → defaults, `page` of `0` / `-4` / `abc` → 1, `"2.7"` → 2, repeated `?q=` → first value, a
-  140-char filter cut to 100); `jobsHref` round trips including `a&b=c?d#e` → `?q=a%26b%3Dc%3Fd%23e`;
-  the `or()` quoting with its negative control; and SQL semantics against the live rows —
-  `ILIKE '%oracle%'` and `'%ORACLE%'` both match 7 of 20, the comma-bearing company matches 10,
-  `match_score >= 70` is **0** rows and `< 70` is 20.
-- **Nothing in feature 11 has rendered for a signed-in user.** Every control, the debounce, the
-  clamp, both empty-state sentences and `Link` navigation are unexercised.
-- **Pagination cannot be exercised by the current data** — 20 rows at 20 per page is exactly one
-  page. A 21st row is needed before Previous / Next / page numbers leave their single-page state.
-- **The database changed under this session.** Someone ran a search in the browser at 07:50Z while
-  the work was in progress — a *different* location (Virginia), so it inserted ten new rows rather
-  than deduping. The table now holds **1 profile, 2 `agent_runs`, 20 jobs**, one user. Because
-  `match_score >= 70` is 0 rows, **High Match currently renders the filtered empty state** and Low
-  Match renders everything — convenient for a browser pass.
-- **Git: feature 11 is uncommitted and sitting on `feat/10-adzuna-job-discovery`.** That branch has
-  six commits, is not merged and not pushed; `main` is level with `origin/main` at `90de227`.
-  Uncommitted: `app/find-jobs/page.tsx`, `components/find-jobs/{JobFilters,JobsPagination,JobsTable}.tsx`,
-  `lib/jobs.ts`, `types/index.ts`, and four `context/*.md` files, plus `memory.md`. The saved
-  convention is a branch per build-plan feature (`feat/NN-slug` off `main`), which this does not
-  follow — decide whether to merge 10 first and re-branch, or commit 11 where it stands.
+- `npx tsc --noEmit`, `npm run lint` and `npm run build` all clean. Every route `ƒ`,
+  `/find-jobs/[id]` registered. Both temporary verification routes deleted and confirmed 404.
+- **Verified by execution:** the parse path over seven shapes against a row copied verbatim from the
+  live table (null arrays → `[]`, undefined text → `null`, extra keys stripped, missing title /
+  string score / bare string all rejected); the id guard with a discriminating negative control —
+  `nope`, `1' OR '1'='1`, `" "` and a truncated uuid all returned 404 **without touching the
+  database**, while two well-formed uuids reached PostgREST and came back `42501 permission denied`;
+  `matchBadge` at 69/70/85; `formatJobType` over all six inputs; the rendered markup over three job
+  shapes including a bare row that correctly dropped four elements; one `<a>` per table row with the
+  right href; and all ten new selectors present in the emitted CSS.
+- **The page has now rendered for a signed-in user, once.** Clicking a row through works — that pass
+  is what surfaced the truncated-description complaint. **Still unexercised:** the back link, View
+  Job Post and Apply Now actually opening Adzuna, the not-found page for a valid-but-absent uuid, the
+  loading skeleton, responsive stacking, and the keyboard focus ring on a row.
+- **The page cannot look like its design, and that is the data, not the page.** Live table: top
+  `match_score` is **65**, so every job renders the grey Low Match badge and the green one is
+  unreachable; `job_type` is null on all 20 rows, so Job Type always reads `—`; every salary is a
+  single figure because `salary_min == salary_max`; and the four description arrays are empty by
+  feature 10's design, so Job Description is one paragraph. **Do not "fix" the page to match the
+  picture.**
+- Database unchanged this session: 1 profile, 2 `agent_runs`, 20 jobs, one user.
+- **Git: features 10, 11 and 12 are all merged to `main`** (`f79e529 Merge feature 12: job details
+  page UI`). The review fixes live on `fix/12-review-findings`, branched off that merge and pushed.
+
+## Review fixes — the ones that are rules, not patches
+
+- **`notFound()` needs a `not-found.tsx` with `AppNavbar`.** Without one Next serves a bare 404 with
+  no navigation, which is the dead-end `architecture.md` made an invariant. `not-found.tsx` takes no
+  props, so it reads the session itself via the cached `getSessionUser()`.
+- **Any row link into a protected dynamic route gets `prefetch={false}`.** Twenty rows defaulted to
+  twenty `requireUser()` calls and twenty job reads fired by scrolling. `loading.tsx` is what keeps
+  the click immediate instead — and it costs the route its hard 404 (streamed headers ⇒ 200 +
+  `robots: noindex`), which is free behind auth.
+- **A fill colour is not the colour that goes on top of it.** Third time this project has hit it:
+  `text-success` on its own tint was 2.4:1 → `text-success-foreground`; gap chips were 4.2:1 →
+  `text-accent-dark`. `DossierPreview` still has the old pairing — noted in `ui-tokens.md`.
+- **Third-party URLs are scheme-checked before they become `href`s.** `safeExternalUrl()` gates both
+  job URLs inside `JobDetailSchema`, so `JobDetail` only ever carries http/https.
+- **Text the app displays but did not author, and cannot show in full, says who cut it and where the
+  rest is.** Silence reads as a bug — it was reported as one.
+- **Never run `next build` while `next dev` owns the same `.next`.** It rewrites `.next/server`,
+  `.next/static` and `BUILD_ID` under the live server, and the dev worker dies with `Jest worker
+  encountered N child process exceptions` — **no application error is logged**, so it looks like a
+  bug in whichever route was requested. That cost real time this session. Also: the dev log prints
+  12-hour time with no AM/PM, so a `02:13` entry is 14:13.
 
 ## Next session starts with
 
-1. **Sort out the git story before writing more code.** Feature 11's changes are uncommitted on the
-   feature-10 branch. Either merge 10 to `main` and cut `feat/11-filter-sort-pagination`, or commit
-   11 onto the existing branch and merge both. Nothing has ever been pushed.
-2. **Browser pass for feature 11.** Type in the filter (watch the 300ms debounce and that the caret
-   never jumps), switch both selects, confirm the URL updates and the back button does not un-type,
-   hit `?page=99` by hand and confirm it clamps, and check High Match shows the *filtered* empty
-   sentence rather than "No jobs yet". To test pagination at all, either add a 21st row or
-   temporarily drop `JOBS_PAGE_SIZE`.
+1. **Merge `fix/12-review-findings` into `main`.** It is pushed but not merged.
+2. **Finish the browser pass for features 11 and 12.** For 11: type in the filter (watch the 300ms
+   debounce and that the caret never jumps), switch both selects, confirm the back button does not
+   un-type, hit `?page=99` and confirm it clamps, and check High Match shows the *filtered* empty
+   sentence. For 12: Back to Jobs, both external links, a valid-but-absent uuid for the not-found
+   page, and the loading skeleton. **Pagination still cannot be exercised** — 20 rows at 20 per page
+   is one page, so a 21st row or a lowered `JOBS_PAGE_SIZE` is needed.
 3. **Fix the country defect** — add `in` and the other Adzuna markets to `ADZUNA_COUNTRIES` in
    `lib/adzuna.ts`, **and** surface the market actually searched in the result banner (`agent_logs`
    already records it: "Adzuna returned 10 **us** listings"). Delete the ten Indianapolis rows after.
 4. **Run the same search twice** — still never done. Two runs have happened but they were different
    searches, so the dedupe path has never executed. Row count must not change, `found_at` must not
    move, `run_id` must move to the new run, a hand-set `company_research` must survive.
-5. **Feature 12 — Job Details Page.** Remember the description arrays are empty by design, so render
-   only sections that have content. It also adds the table row `href`.
+5. **Feature 13 — Company Research Agent.** It must add `company_research` to the select, the
+   nine-field dossier markup and the button handler together, and it needs a `"use client"` boundary
+   in `CompanyResearch` for the first time.
 
 ## Open questions
 
+**Feature 12:**
+
+- Nothing has run in a browser.
+- **The design's header badge is unreachable with current data** (top score 65). Confirm the green
+  variant renders once a job scores 70+.
+- The Back to Jobs link points at bare `/find-jobs` and drops the list's filter. The browser back
+  button preserves it. Judged acceptable; revisit if it reads as a bug in the browser pass.
+
 **Feature 11:**
 
-- Nothing has run in a browser. Pagination specifically cannot be tested until a 21st row exists.
+- Nothing has run in a browser. Pagination cannot be tested until a 21st row exists.
 - Should a new search reset the filters? Today it does not: with `match=high` active, a search can
   report "Found 10 jobs" above a table saying "No jobs match these filters". Judged honest and left
   alone, but it will look like a bug the first time someone hits it.
@@ -155,8 +184,9 @@ precisely so this feature would only add behaviour.
   full-access key had been pasted into the public anon-key variable and served to browsers before
   being replaced.
 - **Input masking has not been confirmed in an actual recording.**
-- **Feature 09's responsive behaviour has never been looked at** — horizontal scroll under 720px,
-  the stacking of the search row and filter bar, row hover, select focus rings, the table on a phone.
+- **Responsive behaviour has never been looked at on `/find-jobs` or `/find-jobs/[id]`** — horizontal
+  scroll under 720px, the stacking of the search row, filter bar, job header row and fact grid, row
+  hover, select focus rings, and how the table reads on a phone.
 
 **Small, worth doing when convenient:**
 

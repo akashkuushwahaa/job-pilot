@@ -340,7 +340,7 @@ Three columns from earlier drafts do not exist and must not be re-added:
 | location           | text        |                                                |
 | salary             | text        | If available                                   |
 | job_type           | text        | fulltime / parttime / contract                 |
-| about_role         | text        | 2-3 sentence summary                           |
+| about_role         | text        | Adzuna's snippet, verbatim — see below          |
 | responsibilities   | text[]      | Bullet points                                  |
 | requirements       | text[]      | Bullet points                                  |
 | nice_to_have       | text[]      | Optional                                       |
@@ -352,6 +352,22 @@ Three columns from earlier drafts do not exist and must not be re-added:
 | missing_skills     | text[]      | Skills user lacks                              |
 | company_research   | jsonb       | Company dossier from research agent            |
 | found_at           | timestamptz |                                                |
+
+**`about_role` is a fragment, not a summary.** This row said "2-3 sentence summary", which is what a
+reader would build against and is not what the column holds. Adzuna's search endpoint returns a
+**500-character snippet that stops mid-word and ends in a single `…`** — verified across all ten live
+results in feature 10 and all 20 stored rows, every one exactly 500 characters, every one ending in
+that character. Feature 10 stores it verbatim rather than restructuring it, because structuring a
+fragment means inventing the part that was removed.
+
+Two consequences, both load-bearing:
+
+- **Anything rendering it must say so.** `isTruncatedDescription()` in `lib/jobs.ts` keys on the
+  ellipsis, not the length, and the details page pairs it with a link to `source_url`. An
+  unexplained mid-word stop under a "Job Description" heading reads as a broken renderer — it was
+  reported as one.
+- **The real body has to be fetched from the posting.** Feature 13 already follows the Adzuna
+  redirect to reach the employer's site, so it is the feature that closes this — see `build-plan.md`.
 
 **Re-running a search must not duplicate rows.** The unique index
 `(user_id, source, external_id)` is the dedupe key; feature 10 upserts onto it.
@@ -646,6 +662,10 @@ Rules the AI agent must never violate:
 - Company research always returns a dossier — even if browser research fails, GPT-4o synthesizes from company name and job description alone. Never return empty.
 - Browserbase sessions are always closed with stagehand.close() when done — never leave sessions open.
 - Always scope InsForge queries to the current user_id — never query without a user filter.
+- Any third party URL rendered into an `href` passes `safeExternalUrl()` first — `lib/adzuna.ts`
+  validates `redirect_url` only for non-emptiness, so `jobs.source_url` and `jobs.external_apply_url`
+  are untrusted strings until their scheme is checked. Gated once in `JobDetailSchema` rather than at
+  each call site.
 - Any user-supplied value interpolated into a PostgREST `or()` string is double-quoted first.
   PostgREST parses that argument itself, so an unquoted comma, dot or parenthesis is read as syntax
   and fails the whole request — this user's own data contains a company called

@@ -926,11 +926,81 @@ through to the page, the back link, View Job Post and Apply Now actually opening
 a valid-but-absent uuid (anonymous callers cannot get past the privilege layer to reach it), the
 responsive stacking of the header row and the fact grid, and the keyboard focus ring on a table row.
 
+### Feature 12 — issues found by `/review` and fixed
+
+Nine findings across the three layers; all resolved in the same session.
+
+- **Critical — `notFound()` had nowhere to land.** There was no `not-found.tsx` anywhere in the app,
+  so a missing or non-uuid job id rendered Next's bare default 404: no `AppNavbar`, no way back into
+  the app. That is the exact defect `architecture.md` made an invariant after `/dashboard` shipped
+  without navigation and stranded signed-in users — and feature 12 introduced the app's first
+  `notFound()` call without the boundary it needs. Added `app/find-jobs/[id]/not-found.tsx`. It takes
+  no props (Next's contract), so it reads the session itself with `getSessionUser()`; `cache()` makes
+  that free on a request that already resolved the user.
+- **Critical — the crash was environmental, and it was self-inflicted.** Clicking a row killed the
+  dev server's render worker (`Jest worker encountered 2 child process exceptions`), twice, with no
+  application error logged. Cause: `npm run build` was run three times **while the dev server was
+  live**, rewriting `.next/server`, `.next/static` and `BUILD_ID` underneath it. `/find-jobs/[id]`
+  was the first route that server had never compiled, so it was the first to go looking for chunks
+  the production build had replaced. Fixed by stopping the server, deleting `.next` and restarting.
+  **Never run `next build` against a `.next` that a running `next dev` owns.**
+- **Important — the visual score indicator was missing.** `project-overview.md` asks the match
+  section for a score number *and* a visual indicator; the design draws only the badge, and the two
+  had been reconciled silently in favour of the design. The bar now sits under the badge in
+  `JobInfo`, reusing feature 09's `matchScoreFill()` so this page and the jobs table can never colour
+  the same score differently. Verified: 65 → `bg-warning`, 85 → `bg-info`, 95 → `bg-success`.
+- **Important — the AI Match Reasoning icon failed the graphical contrast floor.** `text-success`
+  (#10B981) on `bg-success-lightest` (#ECFDF5) is **2.4:1**, under 3:1. Now
+  `text-success-foreground` (#007A55) at 5.4:1 — `ui-tokens.md`'s own rule, third time this project
+  has hit it. **A fill colour is not the colour that goes on top of it.**
+- **Important — twenty rows meant twenty prefetched server renders.** `<Link>` on each table row
+  prefetches `/find-jobs/[id]`, a protected dynamic route, so scrolling the list could fire twenty
+  `requireUser()` calls and twenty job reads. Rows now carry `prefetch={false}`, and
+  `app/find-jobs/[id]/loading.tsx` keeps the click feeling immediate without them.
+- **Important — `source_url` and `external_apply_url` reached `href` unvalidated.** `lib/adzuna.ts`
+  checks `redirect_url` only for non-emptiness, so any string Adzuna sends became a clickable link.
+  `safeExternalUrl()` in `lib/utils.ts` now gates both at the parse boundary in `JobDetailSchema`, so
+  `JobDetail` carries only http/https URLs and no consumer has to remember. Verified against
+  `javascript:` (plain, mixed-case and space-prefixed), `data:`, `vbscript:`, `file:`,
+  protocol-relative, relative, garbage, empty and null — all null; http and https pass through
+  verbatim with query strings intact.
+- **Minor — gap-skill chips were 4.2:1.** `text-accent` (#7C5CFC) on `bg-accent-muted` (#FAF5FF) is
+  under the 4.5:1 floor for the 12px text these chips use. Now `text-accent-dark` (#5E4CFF) at
+  5.0:1, no new token needed. `ui-tokens.md`'s Skills Badges table corrected. The job-type fact chip
+  keeps `text-accent` — it is an icon, and 4.2:1 clears the 3:1 graphical floor.
+  **`DossierPreview` still has the old pairing at 14px; left alone as out of scope.**
+- **Minor — no loading boundary.** `loading.tsx` added, which costs the route its hard 404 (a
+  streamed response has already sent its headers, so `notFound()` returns 200 with
+  `robots: noindex`). Free here — the route is behind auth and nothing crawls it.
+- **Minor — `source` is not rendered on the details page**, though `project-overview.md` lists it.
+  Closed without a change: same reasoning feature 09 documented for the SOURCE column — `jobs.source`
+  is `'search' | 'url'`, discovery is Adzuna-only, and URL import is out of scope, so the field can
+  only ever show one value. Recorded here rather than left implicit.
+
+**Verified after the fixes:** `npx tsc --noEmit`, `npm run lint` and `npm run build` all clean, every
+route `ƒ`. A fresh dev server on a clean `.next` serves `/login` 200 and 307s `/find-jobs`,
+`/find-jobs/<uuid>` and `/find-jobs/nope` to `/login`, with **zero** worker crashes. Both temporary
+verification routes deleted and confirmed 404.
+
+**Still not verified: the page has never rendered for a signed-in user.** The crash is explained and
+the server is healthy, but that is not the same as the route being proven — a browser pass is still
+what closes features 11 and 12.
+
 ---
 
 ## Notes
 
 _Add notes here as the build progresses — workarounds, patterns, anything that differs from the context files._
+
+- **Never run `next build` while `next dev` is running.** They share `.next`, and the build rewrites
+  `.next/server`, `.next/static` and `BUILD_ID` underneath the live server. The dev worker then dies
+  with `Jest worker encountered N child process exceptions, exceeding retry limit` — a process-level
+  crash with **no application error logged**, which makes it look like a bug in whatever route was
+  requested. It bites hardest on a route the dev server has not compiled yet. Stop the server first,
+  or accept that `.next` must be deleted and the server restarted afterwards.
+- **The dev log prints 12-hour time with no AM/PM.** A log entry reading `02:13` is 14:13. This
+  matters when correlating log timestamps against file mtimes — it cost real time during the feature
+  12 review before the offset was spotted.
 
 - **The job details page cannot look like its design until the data improves.** Top `match_score` is
   65, so the header badge is grey on every job; `job_type` is null on all 20 rows, so the Job Type

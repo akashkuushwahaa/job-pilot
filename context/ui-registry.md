@@ -871,6 +871,10 @@ column — see the correction note in `build-plan.md`.
     would leave keyboard focus invisible — `focus-within:bg-surface-secondary` is a 1.04:1 change and
     is not an indicator. The ring moves onto the pseudo-element instead:
     `focus-visible:before:ring-1 focus-visible:before:ring-accent focus-visible:before:ring-inset`.
+  - **`prefetch={false}`, and it is not optional.** The page renders up to twenty rows and
+    `/find-jobs/[id]` is a protected dynamic route, so the default prefetch turns scrolling the list
+    into twenty `requireUser()` calls and twenty job reads. **Any row link into an authenticated
+    dynamic route gets this**; the route's `loading.tsx` is what keeps the click immediate instead.
 
 **Empty state** — `ui-rules.md`'s recipe, icon above muted text, no CTA (the CTA is the search card
 already on the page):
@@ -1026,6 +1030,21 @@ needs no other change.
 The bullet marker is a `size-1.5` dot rather than a list-style disc, matching `Features.tsx`'s
 `PointList` shape at a smaller step.
 
+**Truncation note — added after the first browser pass.** The paragraph stops mid-word on every job,
+because Adzuna's snippet does; an unexplained `…` under a heading that says "Job Description" is
+indistinguishable from a broken renderer, and was reported as one. Nothing in this component
+truncates. When `isTruncatedDescription(job.about_role)` is true it renders **ResumeUpload's
+footer-row recipe** — `mt-6 border-t border-border pt-6` around a
+`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between` line, explanatory
+`text-sm text-text-secondary` left, `Button variant="secondary"` with an `ExternalLink` right at
+`sm:shrink-0`. The registry reserves that recipe for exactly this shape, so no new pattern was added.
+
+The link is dropped when `source_url` is null; the sentence alone still explains the ellipsis.
+**Both go away when feature 13 backfills the real description** — see `build-plan.md`.
+
+**The general rule this establishes: text the app displays but did not author, and cannot show in
+full, says who cut it and where the rest is.** Silence reads as a bug.
+
 ### CompanyResearch — `components/job-details/CompanyResearch.tsx`
 
 File: `components/job-details/CompanyResearch.tsx`
@@ -1085,6 +1104,37 @@ is what preserves it.
 
 **Zero Client Components.** Everything on the page is either static or a `Link`; the one interactive
 control, Research Company, is inert until feature 13 hands it a handler.
+
+### Job details not-found — `app/find-jobs/[id]/not-found.tsx`
+
+Rendered by `notFound()` — a non-uuid id, or a job that is not this user's.
+
+**`AppNavbar` is the whole point of this file.** Without it Next serves its bare default 404, which
+carries no navigation, and `architecture.md` makes "every protected page renders `AppNavbar`" an
+invariant precisely because `/dashboard` once shipped without it and stranded signed-in users. **Any
+route that calls `notFound()` needs one of these.**
+
+`not-found.tsx` takes no props, so it resolves the session itself with `getSessionUser()` rather than
+receiving a `userId`. `cache()` makes that free on a request that already resolved the user, and the
+navbar is skipped entirely when there is no session.
+
+Body is the centred-card empty state: `size-12` bordered circle with `SearchX`, a
+`text-base font-semibold` heading, `text-sm leading-6 text-text-secondary` copy, then a
+`Button variant="secondary" size="lg"` Back to Jobs link — the one empty state on this page that
+*does* get a CTA, because unlike the jobs table there is nothing else on screen to act on.
+
+### Job details loading — `app/find-jobs/[id]/loading.tsx`
+
+Skeleton mirroring the real layout: back link, header card, the four-card fact grid, one text card.
+Blocks are `animate-pulse rounded-md bg-border-light` at the same sizes the real elements occupy.
+
+**It exists because the rows carry `prefetch={false}`** — without it a row click has no feedback at
+all until the server answers. **It renders no `AppNavbar`**: `loading.tsx` fills the page slot, and a
+skeleton navbar would flash a second header under the real one.
+
+Trade it makes: a streamed response has already sent its headers, so `notFound()` downstream returns
+200 with `robots: noindex` rather than a hard 404. Documented in Next's own `loading.js` reference,
+and free here — the route is behind auth and nothing crawls it.
 
 ### Profile page — `app/profile/page.tsx`
 
