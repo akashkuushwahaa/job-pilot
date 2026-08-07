@@ -7,11 +7,11 @@ import { CompletionIndicator } from "@/components/profile/CompletionIndicator";
 import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
 import {
+  fetchDashboardStats,
   mockActivity,
   mockJobsFound,
   mockResearchActivity,
   mockScoreDistribution,
-  mockStats,
 } from "@/lib/dashboard";
 import { createInsforgeServer } from "@/lib/insforge-server";
 import { fetchProfile } from "@/lib/profile";
@@ -20,7 +20,13 @@ export default async function DashboardPage() {
   const user = await requireUser();
   const insforge = await createInsforgeServer();
 
-  const profile = await fetchProfile(insforge, user.id, "dashboard/page");
+  // Concurrent: the profile read gates the banner and the stats read fills the
+  // cards, and neither depends on the other.
+  const [profile, stats] = await Promise.all([
+    fetchProfile(insforge, user.id, "dashboard/page"),
+    fetchDashboardStats(insforge, user.id),
+  ]);
+
   const { percent, missing, isComplete } = completeness(profile);
 
   return (
@@ -40,7 +46,7 @@ export default async function DashboardPage() {
             />
           )}
 
-          <StatsBar stats={mockStats()} />
+          <StatsBar stats={stats} />
 
           <div className="grid gap-6 lg:grid-cols-2">
             <RecentActivity entries={mockActivity()} />
