@@ -6,18 +6,20 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 4 — Job Details Page, in progress
-**Last completed:** 12 Job Details Page — Full UI. `/find-jobs/[id]` renders the whole job from the
-`jobs` row: header, four fact cards, GPT-4o's reasoning, both skill lists, the description and the
-Apply action. Company Research is the empty state only — feature 13 owns the agent and the button's
-handler. The table rows link now, closing the one placeholder feature 09 left. **Not yet run in a
-browser** — see Feature 12 below.
+**Phase:** Phase 5 — Dashboard, in progress
+**Last completed:** 14 Dashboard Page — Full UI. `/dashboard` renders the four stat cards, the
+Recent Activity timeline and all three charts on mock data, plus the incomplete-profile banner. The
+charts are hand-rolled markup and SVG — there is no charting dependency, and the whole page is
+server-rendered. This deleted the last `ComingSoon` stub.
 **Open defect, carried:** searching a country the app does not support returns confidently wrong
 results rather than nothing — "India" was scored as Indianapolis. Details in Notes. It was flagged
 "fix before feature 11", was not fixed then either, and is now the oldest open item — a second run
 has since added ten more US rows.
-**Next:** 13 Company Research Agent. It wires the Research Company button, writes
-`jobs.company_research`, and replaces the empty state with the nine-field dossier.
+**Also carried:** feature 13's research agent has never actually run. No Browserbase session has been
+created from this codebase, so the browse phase, both extraction schemas, the synthesis prompt and
+the dossier card's rendering are all unexercised. `feat/13-company-research` is unmerged.
+**Next:** 15 Stats Bar — Real Data. It replaces `mockStats()` in `lib/dashboard.ts` with four counts
+against the user's own rows and touches no component.
 
 ---
 
@@ -50,7 +52,7 @@ has since added ten more US rows.
 
 ### Phase 5 — Dashboard
 
-- [ ] 14 Dashboard Page — Full UI
+- [x] 14 Dashboard Page — Full UI
 - [ ] 15 Stats Bar — Real Data
 - [ ] 16 Recent Activity — Real Data
 - [ ] 17 Analytics Charts — PostHog Data
@@ -1258,3 +1260,144 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
   - **Google OAuth has not run since the feature-03 fixes.** Both cycles here were GitHub.
   - **Cross-user RLS isolation is still unproven** — `auth.users` holds one user, and admin tooling
     refuses `SET ROLE`. Needs a genuine second signed-in account.
+
+### Feature 14 — Dashboard Page (Full UI)
+
+UI only, on mock data, exactly as the build plan scopes it. `/dashboard` was the last `ComingSoon`
+stub; all three are now gone.
+
+**Found while reading the plan, and it changed the feature:** two of the five surfaces build-plan 14
+lists are from the cut feature set. The fourth stat card is **Jobs This Week**, not Cover Letters
+Generated, and the third chart is **Company Research Activity**, not Resume Tailoring Activity — the
+design draws both that way, feature 15 counts jobs in the last 7 days, feature 17 queries
+`company_researched`, and cover letters and resume tailoring are both out of scope in
+`project-overview.md`. Three sources against one stale line each. Same class of drift as feature 05's
+Cover Letter Tone and feature 01's `agnet-log.png`. `build-plan.md` corrected.
+
+Decisions:
+
+- **No charting library, and recharts was not installed.** `build-plan.md` feature 17 names it and
+  `code-standards.md` does not list it. All three charts are static — no tooltips, no legends, no
+  brushing — and every recharts default (axis lines, tick styling, bar radius, grid stroke) would
+  have had to be overridden to reach the design anyway, while making all three Client Components.
+  `code-standards.md` asks "is there a simpler native solution" first; here it is markup plus one
+  `<svg>`. Same call as feature 01 on `class-variance-authority` and feature 05 on the shadcn CLI.
+  **Confirmed with the developer before building**, because feature 17 inherits it.
+- **The geometry lives in `lib/charts.ts`, not in the components.** An axis ceiling and a Bézier
+  control point are things that can be wrong in ways a screenshot does not reveal, so they are
+  functions that can be run. The components only place what those return.
+- **Whole-number data only gets whole-number ticks.** Every series on this dashboard counts things,
+  and the first cut labelled a max of 3 as `0 / 0.75 / 1.5 / 2.25 / 3` — an axis offering ticks that
+  cannot occur. Caught by running `chartScale` over a range of maxima rather than by looking at the
+  three that happen to be in the design. Costs some headroom above the tallest bar; worst case across
+  the ladder is 30%, at a maximum of 28.
+- **Spline control points are clamped into the plot box.** A Catmull-Rom curve through a sharp peak
+  overshoots, and an overshoot inside a `viewBox` does not curve out of frame — it clips flat against
+  the edge, which reads as a rendering fault rather than as data.
+- **`preserveAspectRatio="none"` plus `vector-effect="non-scaling-stroke"`** is what makes a
+  hand-rolled line chart responsive without JavaScript: the 0-100 viewBox stretches to the card and
+  the stroke stays an even 3px through it. Without the second attribute the line thins and its round
+  caps go elliptical as the card widens.
+- **The completion banner renders only when the profile is incomplete.** `CompletionIndicator` is
+  reused from `components/profile/` unchanged — it takes plain props and computes nothing — so it is
+  now shared by two pages.
+- **Timestamps are stored as ISO instants and rendered with `formatRelativeTime()`**, the feature 09
+  pattern: feature 16 changes the data source and no formatting.
+- **The four mock functions are in `lib/dashboard.ts`, one per surface**, so features 15, 16 and 17
+  each replace exactly one of them and touch no component.
+- **Zero Client Components**, like feature 12's job details page. Every chart is markup and every
+  value is server-rendered.
+- **`AnalyticsCharts.tsx` was not built.** `architecture.md` listed it, but the design does not group
+  the three charts — Company Research Activity sits beside Recent Activity and the other two are a
+  row below — so a component wrapping all three would have to render two non-adjacent parts of the
+  page. It is `ChartCard` + `BarChart` + `LineChart` instead, one component per file as
+  `code-standards.md` requires. `architecture.md` corrected.
+- **No new PostHog event.** The list stays at seven.
+
+Found while building:
+
+- **`ui-tokens.md`'s Activity Dots table and Dashboard Chart Colors table were both stale**, naming
+  resume tailoring and cover letters. The chart table also listed raw hex for colours that all had
+  exact tokens, under a document whose first invariant is never to use hex in a component. Both
+  rewritten in tokens.
+- **The design's activity dots do not encode anything.** Purple on rows 1 and 4, blue on row 2, green
+  on rows 3 and 5 — across two entry types, in no consistent pattern, with purple being the
+  out-of-scope tailoring colour. Built to `build-plan.md` feature 16's two-colour rule instead.
+
+**Verified by execution:** 45 checks over `lib/charts.ts` (a temporary script, run under Node's
+type stripping). The three series the design draws produce exactly the axes it draws — `0,3,6,9,12`
+for the research bars and `0,25,50,75,100` for both 85-value charts. Across fourteen maxima from 1 to
+4321 the ceiling is never below the maximum, there are always five ticks, the last tick is always the
+ceiling and every tick is a whole number. Empty, all-zero and all-negative series return a drawable
+axis rather than dividing by zero; `plotPercent` clamps negatives and survives a zero ceiling; the
+line path starts at x=0 and ends at x=100, closes its area along the baseline, keeps every coordinate
+inside the viewBox, and clamps a 0→100→0 spike instead of clipping it. One, two and zero-point series
+all return something sane.
+
+**Browser pass, 2026-08-03 — the page was rendered and read at three widths.** A temporary preview
+route (since deleted, confirmed 404) rendered the components unauthenticated at 1470px, 834px and
+414px. The layout matches the design at full width; the stats bar goes 4 → 2 → 1 and both chart rows
+collapse to single column; the line chart's curve and stroke weight survive the width change, which
+is the whole point of the non-scaling-stroke decision. **One real defect found and fixed:** the score
+buckets ("50-60%") wrapped at their hyphen in the narrow card — `whitespace-nowrap` on the category
+labels. Console clean, no errors or warnings. `tsc`, lint and build all clean, every route still `ƒ`,
+and `/dashboard` still 307s to `/login` while signed out.
+
+**Not verified:** the real `/dashboard` has not been opened in a signed-in browser, so the profile
+read, the `AppNavbar` and the incomplete-profile banner in place have not been seen. The banner will
+not render for this user in any case — the profile is complete, which is why searches have run.
+
+### Feature 14 — issues found by `/review` and fixed
+
+Six findings, all resolved in the same session. Two mattered.
+
+- **Important — one non-finite value silently destroyed an entire chart.** `chartScale`,
+  `plotPercent` and `smoothLinePath` all propagated `NaN` and `Infinity` straight through: the
+  ceiling went `NaN`, all five ticks rendered the literal string "NaN", a bar's height became the
+  invalid CSS `"NaN%"`, and the line's `d` attribute stopped parsing so the curve vanished
+  completely. Nothing threw and nothing logged. **These three functions are the boundary feature 17
+  feeds from PostHog**, which is external input, and the project's standing rule is to narrow at the
+  boundary rather than trust the type — the same rule `parseProfile` and every GPT-4o zod schema
+  exist for. `finiteSeries()` now coerces to zero and logs once per series; `plotPercent` guards both
+  arguments; `smoothLinePath` returns null on a non-finite ceiling. **Found by probing the functions,
+  not by reading them.**
+- **Important — a negative trend rendered green.** `StatCard` hardcoded
+  `bg-success-lightest text-success-darker` while the sign logic beside it
+  (`stat.trend > 0 ? "+" : ""`) explicitly anticipated negatives — so the code handled the sign in one
+  place and not the other. Feature 15 computes these from real week-on-week counts, so a week where
+  jobs found dropped would have shown "-8%" styled as a success. Now three tones: rising green,
+  falling `bg-error/10 text-error-dark` (the pair `CompletionIndicator` already uses, because
+  `--color-error` measures 3.3:1 on its own tint), flat neutral.
+- **Minor — the charts had no empty state.** `build-plan.md` assigns them to feature 17, but
+  `ui-rules.md`'s "every section that can be empty must have an empty state" is project-wide and an
+  all-zero series is reachable the moment real data lands. `ChartCard` takes `emptyMessage` and
+  replaces the whole frame with the standard centred empty state; `hasPlottableData()` decides. An
+  axis with no marks under it is indistinguishable from a chart that failed to draw.
+- **Minor — the all-zero branch hardcoded its ticks.** It returned
+  `{ ceiling: TICK_COUNT, ticks: [0,1,2,3,4] }`, where the ceiling equalling the tick count was a
+  coincidence of step 1. Changing `TICK_COUNT` would have left an axis whose last tick was not its
+  ceiling. Both now derive from one step through `ticksFrom()`.
+- **Minor — the profile read was duplicated verbatim** across `/dashboard` and `/profile`: same
+  query, same fatal-on-error branch, same parse. Extracted to `fetchProfile()` in `lib/profile.ts`,
+  which is where `architecture.md` puts data access — `app/` is pages.
+- **Minor — `ACTIVITY_KINDS` was exported and never read.** `JOB_MATCH_FILTERS` and `JOB_SORTS` are
+  const arrays because the URL parser validates an untrusted string against them at runtime;
+  `ActivityKind` is only ever constructed by the code that builds the entry, so the array had no
+  reader. Now a plain union.
+
+Also hardened while in there: React keys on chart points and category labels are `label-index`
+rather than the label alone, so a series with a repeated bucket name cannot collide.
+
+**Verified by execution:** 32 further checks. The three series the design draws produce byte-identical
+axes to before the fix, so the hardening changed nothing that was already right. `NaN`, `Infinity` and
+`-Infinity` in a series now yield a finite ceiling and five finite ticks; `plotPercent` returns 0 for
+a non-finite value *or* a non-finite ceiling; `smoothLinePath` emits a path containing no "NaN" and
+returns null on a non-finite ceiling; the all-zero branch's last tick is its ceiling;
+`hasPlottableData` is false for all-zero, empty, all-non-finite and negatives-only and true for one
+positive.
+
+**Second browser pass, 2026-08-03.** A temporary preview route (since deleted, confirmed 404)
+rendered all four trend states side by side — `+12%` green, `-8%` red, `0%` neutral, and no badge —
+and both chart empty states. Then the populated dashboard was re-rendered to confirm the `ChartCard`
+restructure broke nothing: grid, both axes, bars, curve and labels all unchanged. Console clean.
+`tsc`, lint and build clean, every route still `ƒ`, `/dashboard` still 307s to `/login`.

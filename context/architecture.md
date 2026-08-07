@@ -84,16 +84,17 @@
 │   │   ├── Navbar.tsx                       → Homepage chrome — nav + CTA
 │   │   ├── AppNavbar.tsx                    → Authenticated chrome — nav with active item
 │   │   ├── Footer.tsx
-│   │   ├── ErrorState.tsx                  → Shared card for both error boundaries
-│   │   └── ComingSoon.tsx                  → Placeholder card for unbuilt protected routes
+│   │   └── ErrorState.tsx                  → Shared card for both error boundaries
 │   ├── homepage/
 │   │   ├── Hero.tsx
 │   │   ├── HowItWorks.tsx
 │   │   └── Features.tsx
 │   ├── dashboard/
-│   │   ├── StatsBar.tsx
+│   │   ├── StatsBar.tsx                     → The four-card row
+│   │   ├── StatCard.tsx                     → One stat card
 │   │   ├── RecentActivity.tsx
-│   │   └── AnalyticsCharts.tsx
+│   │   ├── ChartCard.tsx                    → Card, title, dashed grid, both axes
+│   │   └── BarChart.tsx / LineChart.tsx     → The marks only; no chart library
 │   ├── profile/
 │   │   ├── ProfileWorkspace.tsx             → Owns form state; the node both cards write to
 │   │   ├── ProfileForm.tsx                  → All five form sections; controlled by the workspace
@@ -131,8 +132,10 @@
 │   ├── resume-pdf.tsx                     → The react-pdf Document + renderResumePdf()
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
-│   ├── profile.ts                         → parseProfile + both directions of the row <-> form mapping
+│   ├── profile.ts                         → fetchProfile, parseProfile + both directions of the row <-> form mapping
 │   ├── jobs.ts                            → parseJobList, the discovery banner sentence, the filtered/sorted/paged list read, and the single-job read
+│   ├── charts.ts                          → Axis ceilings, bar heights, the smoothed line path
+│   ├── dashboard.ts                       → The dashboard's data — mock until features 15-17
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -552,10 +555,10 @@ components/auth/SignOutButton posthog.capture() then posthog.reset()
 lib/posthog-server.ts         captureServerEvent() — every server-side event
 ```
 
-Identification lives in the **root layout**, not in a page. Pages come and go — the stubs that hold
-`ComingSoon` are deleted by features 05, 09 and 14 — and identity that lives in a page disappears
-with it. `getSessionUser()` is wrapped in React `cache()` so the layout and the page share one
-InsForge round-trip per request.
+Identification lives in the **root layout**, not in a page. Pages come and go, and identity that
+lives in a page disappears with it — the three `ComingSoon` stubs that once held it were deleted by
+features 05, 09 and 14, taking the component with them. `getSessionUser()` is wrapped in React
+`cache()` so the layout and the page share one InsForge round-trip per request.
 
 Server events go through `captureServerEvent(userId, event, properties)`, which uses
 `captureImmediate`, forces `userId` onto every event, bounds the retry budget, and reports delivery
@@ -680,7 +683,15 @@ Rules the AI agent must never violate:
 
 - API routes contain no UI logic. Components contain no DB logic.
 - Every `profiles` row read goes through `parseProfile()` — never annotate an SDK result as a typed
-  row, because `any` is assignable to anything and the annotation checks nothing.
+  row, because `any` is assignable to anything and the annotation checks nothing. A page reads the
+  caller's own row through `fetchProfile()` rather than writing the query out again: `/profile` and
+  `/dashboard` both render something consequential off the answer, and both need the same
+  throw-rather-than-degrade branch.
+- **Every value that reaches a chart is checked for finiteness first.** `lib/charts.ts` coerces
+  `NaN` and `Infinity` to zero and logs, because a single non-finite value otherwise renders the
+  string "NaN" across an axis, sets a bar's height to the invalid CSS `"NaN%"`, and makes the line's
+  `d` attribute unparseable so the curve disappears — all without throwing. Feature 17 feeds these
+  functions from PostHog, which is external input. Found by `/review` on feature 14.
 - Every GPT-4o response is validated with zod before use, for the same reason. A model response is
   untrusted input, not a typed object.
 - The resume object key is always `{user.id}/resume.pdf` derived from the session. No route accepts
