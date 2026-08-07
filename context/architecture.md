@@ -135,7 +135,7 @@
 │   ├── profile.ts                         → fetchProfile, parseProfile + both directions of the row <-> form mapping
 │   ├── jobs.ts                            → parseJobList, the discovery banner sentence, the filtered/sorted/paged list read, and the single-job read
 │   ├── charts.ts                          → Axis ceilings, bar heights, the smoothed line path
-│   ├── dashboard.ts                       → The dashboard's data — mock until features 15-17
+│   ├── dashboard.ts                       → fetchDashboardStats + the mock series features 16-17 replace
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types

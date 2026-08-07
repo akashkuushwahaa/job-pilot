@@ -7,19 +7,20 @@ Update this file after every completed feature. Any AI agent reading this should
 ## Current Status
 
 **Phase:** Phase 5 — Dashboard, in progress
-**Last completed:** 14 Dashboard Page — Full UI. `/dashboard` renders the four stat cards, the
-Recent Activity timeline and all three charts on mock data, plus the incomplete-profile banner. The
-charts are hand-rolled markup and SVG — there is no charting dependency, and the whole page is
-server-rendered. This deleted the last `ComingSoon` stub.
+**Last completed:** 15 Stats Bar — Real Data. The four cards read the user's own `jobs` rows through
+`fetchDashboardStats()`; no component changed, because feature 14 built them against
+`DashboardStat[]`. Live account renders 30 / 51% / 2 / 30 with no trend badges — every row was
+discovered on one day, so there is no previous week to compare against.
+**Corrected, 2026-08-03:** feature 13's research agent **has run**, twice, end to end — the standing
+note that it never had is wrong. `agent_logs` records both runs on 2026-08-02, each reading 4 pages
+(`votoconsulting.com` 16:36-16:37, `oracle.com` 16:53-16:54) and saving a complete nine-field
+dossier. Both rows carry 4 `sources`, so the browser phase genuinely reached the employer's site.
 **Open defect, carried:** searching a country the app does not support returns confidently wrong
-results rather than nothing — "India" was scored as Indianapolis. Details in Notes. It was flagged
-"fix before feature 11", was not fixed then either, and is now the oldest open item — a second run
-has since added ten more US rows.
-**Also carried:** feature 13's research agent has never actually run. No Browserbase session has been
-created from this codebase, so the browse phase, both extraction schemas, the synthesis prompt and
-the dossier card's rendering are all unexercised. `feat/13-company-research` is unmerged.
-**Next:** 15 Stats Bar — Real Data. It replaces `mockStats()` in `lib/dashboard.ts` with four counts
-against the user's own rows and touches no component.
+results rather than nothing — "India" was scored as Indianapolis. Details in Notes. Oldest open item;
+a third search has since taken the table to 30 rows.
+**Next:** 16 Recent Activity — Real Data. It merges `agent_runs` and researched `jobs` into
+`ActivityEntry[]` and replaces `mockActivity()`. Note the shape problem feature 13 left: research
+runs write no `agent_runs` row, so the merge has to read `agent_logs` or the `jobs` rows directly.
 
 ---
 
@@ -53,7 +54,7 @@ against the user's own rows and touches no component.
 ### Phase 5 — Dashboard
 
 - [x] 14 Dashboard Page — Full UI
-- [ ] 15 Stats Bar — Real Data
+- [x] 15 Stats Bar — Real Data
 - [ ] 16 Recent Activity — Real Data
 - [ ] 17 Analytics Charts — PostHog Data
 
@@ -1401,3 +1402,62 @@ rendered all four trend states side by side — `+12%` green, `-8%` red, `0%` ne
 and both chart empty states. Then the populated dashboard was re-rendered to confirm the `ChartCard`
 restructure broke nothing: grid, both axes, bars, curve and labels all unchanged. Console clean.
 `tsc`, lint and build clean, every route still `ƒ`, `/dashboard` still 307s to `/login`.
+
+### Feature 15 — Stats Bar (Real Data)
+
+`mockStats()` deleted; `fetchDashboardStats()` reads the user's own `jobs` rows. No component
+changed — feature 14 built the cards against `DashboardStat[]`, and this only changed where the array
+comes from. The activity feed and the three chart series are still mock, as features 16 and 17 own.
+
+Decisions:
+
+- **Two queries, not four.** One selects `match_score, found_at` for the user's rows; one is a
+  `head: true` count with `.not("company_research", "is", null)`. The totals, the average, the week
+  bucket and both previous-week baselines all fall out of the first result set, so splitting them
+  into separate counts would be four round trips to answer what one already carries. The research
+  count stays separate because the alternative is selecting `company_research` itself — pulling every
+  dossier on the account across the wire to answer a question about how many there are.
+- **The average is computed in JS, not by Postgres.** PostgREST only exposes aggregate functions when
+  the server enables `db-aggregates-enabled`, and nothing on the client can prove that is on. A
+  user's own jobs are a bounded set — 30 today — and this reads one integer and one timestamp from
+  each. Left as an open question rather than assumed either way.
+- **"vs last week" compares the value now against the value seven days ago**, not this week's jobs
+  against last week's. Total Jobs Found is cumulative, so "your total rose 12%" is the only reading
+  of a badge on it that is true.
+- **Both badges are a relative percentage, so "+12%" means one thing everywhere.** A
+  percentage-point delta on the match rate would render "+3%" for a move from 79% to 82% — a
+  different claim wearing the same badge as the count's. One badge shape, one meaning.
+- **No previous value means no badge, and the caption changes with it.** A first-week account has
+  nothing to divide by, and "vs last week" sitting under a number with nothing beside it reads as a
+  missing element. Total Jobs Found falls back to "All time", Avg. Match Rate to "Across all jobs".
+  **This is what the live account renders today** — all 30 rows were discovered on one day.
+- **No scored job means no average, and that is not zero.** `DashboardStat.value` became
+  `string | null`; `StatCard` renders the em dash with an `sr-only` "Not available yet", the
+  treatment `JobInfo` established for an absent fact. A rate of 0% is a claim about the quality of
+  someone's matches; the absence of one is not.
+- **An unscored row counts towards Total Jobs Found and towards nothing else.** `match_score` parses
+  as `z.number().finite().nullable().catch(null)` rather than `.catch(0)` — folding a missing score
+  in as a zero would report a worse match rate than the user actually has. Feature 10 skips unscored
+  jobs, so this should never fire; jsonb and PostgREST have both drifted on this project before.
+- **A read failure throws.** A dashboard that silently reports zeroes because a query failed is worse
+  than one that says it broke — the user reads "0 jobs found" as their data being gone.
+- **The two reads run concurrently** with the profile read the banner needs, since neither depends on
+  the other.
+
+**Verified by execution:** 25 checks over `buildStats` and `parseStatRows`, covering a normal
+account, an empty one, a first-week one, a week where the rate fell, an unscored row, the exact
+seven-day boundary, and rows with an unusable `found_at`. Then **the 30 real rows were pulled out of
+the live database and fed through the real parse and the real builder**: 30 / 51% / 2 / 30, which
+matches Postgres's own `count(*)`, `avg(match_score)` = 50.67, `count(*) FILTER (company_research IS
+NOT NULL)` = 2 and `count(*) FILTER (found_at >= now() - interval '7 days')` = 30 exactly.
+`tsc`, lint and build clean.
+
+**Not verified:** the two PostgREST calls have not been executed against the live API. An
+unauthenticated request cannot reach the rows — `anon` has no grants and RLS scopes by user — so this
+needs a signed-in browser. The SQL equivalent of both filters was confirmed against the live table,
+so what is untested is whether the SDK emits `company_research=not.is.null` as intended, not whether
+the question is the right one.
+
+**Also unverifiable with today's data:** no trend badge can render, because every row was discovered
+on the same day and there is no previous week. The three tones were confirmed in the browser during
+feature 14's review pass; what has not been seen is a badge driven by real data.

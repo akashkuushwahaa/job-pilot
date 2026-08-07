@@ -234,7 +234,10 @@ export type ExtractedFormValues = Partial<
 // change. `value` is pre-formatted because "82%" and "284" are different shapes.
 export type DashboardStat = {
   label: string;
-  value: string;
+  // Null means there is no such number — not zero. An account with no scored
+  // job has no average match rate, and reporting that as 0% is a claim about
+  // the quality of their matches rather than the absence of any.
+  value: string | null;
   trend: number | null;
   caption: string;
 };

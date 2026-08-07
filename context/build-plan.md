@@ -520,6 +520,21 @@ Wire four stat cards to real InsForge DB data for current user.
 - Companies Researched — COUNT of jobs where company_research IS NOT NULL and user_id = current user
 - Jobs This Week — COUNT of jobs found in last 7 days
 
+> Corrected against the delivered feature 15.
+> **Two of the four cards also carry a week-on-week badge**, which this section does not mention but
+> the design draws. "vs last week" compares the value **now** against the value **seven days ago** —
+> Total Jobs Found is cumulative, so that is the only reading of a badge on it that is true — and
+> both badges are a **relative** percentage so that "+12%" means the same thing on the count as on
+> the rate.
+> **No previous value means no badge, and the caption changes to say what the number is instead.**
+> A first-week account has nothing to divide by.
+> **No scored job means no average, and that is not 0%.** `DashboardStat.value` is nullable and the
+> card renders an em dash with an `sr-only` replacement.
+> **The average is computed over the rows, not by Postgres.** PostgREST exposes aggregates only when
+> the server enables them, and the client cannot prove that. Two queries: one selecting
+> `match_score, found_at`, one `head: true` count for the dossiers.
+> `architecture.md` is authoritative.
+
 ---
 
 ### 16 Recent Activity — Real Data

@@ -30,7 +30,14 @@ export function StatCard({ stat }: Props) {
       <p className="text-sm font-medium text-text-secondary">{stat.label}</p>
 
       <p className="mt-2 text-3xl leading-9 font-semibold text-text-primary">
-        {stat.value}
+        {stat.value === null ? (
+          <>
+            <span aria-hidden>—</span>
+            <span className="sr-only">Not available yet</span>
+          </>
+        ) : (
+          stat.value
+        )}
       </p>
 
       <div className="mt-3 flex items-center gap-2">
