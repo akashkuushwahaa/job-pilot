@@ -356,8 +356,27 @@ const session = await bb.sessions.create({
 });
 ```
 
-**Important — Browserbase runs independently from your Next.js server:**
-Browserbase sessions run on Browserbase's cloud infrastructure, not inside your Next.js API route. The API route triggers the Browserbase session and returns a response while the session continues running independently on Browserbase's platform. Do not add `maxDuration` or any timeout configuration to Next.js API routes to accommodate Browserbase session length.
+**Where the session runs, and why the route still needs a duration.**
+Browserbase sessions run on Browserbase's cloud infrastructure, not inside the Next.js API route.
+
+> **Corrected in feature 13.** This section used to conclude from that: *"Do not add `maxDuration`
+> or any timeout configuration to Next.js API routes to accommodate Browserbase session length."*
+> That is right only for a route that starts a session and returns. `/api/agent/research` does not —
+> it **awaits** the extraction results, because the dossier is synthesised from them and returned in
+> the same response. The request is therefore alive for the whole run: a redirect fetch, a
+> description extraction, up to four page visits and two GPT-4o calls. That does not fit a platform
+> default, and a request killed mid-run leaves the user with a spinner and no dossier while the
+> Browserbase session keeps billing.
+>
+> `app/api/agent/research/route.ts` exports `maxDuration = 300`. A route that fires a session and
+> answers immediately still should not.
+>
+> **`maxDuration` is a request, not a guarantee.** Vercel's Hobby tier caps a function at 60s
+> whatever the export says. `agent/browsing.ts` bounds its own phase at `BROWSE_BUDGET_MS` (90s) so
+> a run degrades to fewer pages rather than being killed — but a full four-page run does not fit in
+> 60s. On a tier that caps below ~120s, drop the browser phase instead: leave `BROWSERBASE_*` unset
+> and every run synthesises from the posting and the profile, which is a supported path rather than
+> a broken one.
 
 **Rules:**
 
@@ -371,7 +390,24 @@ Browserbase sessions run on Browserbase's cloud infrastructure, not inside your 
 
 ## Stagehand
 
-**Check first:** Check AGENTS.md for an installed Stagehand skill. If a Stagehand MCP server is configured — use it. The skill/MCP will have the latest act() and extract() patterns.
+**Check first:** There is **no Stagehand skill and no Stagehand MCP server installed** in this
+project — checked in feature 13. Nothing arbitrates this section but the installed type
+definitions, so read them: `node_modules/@browserbasehq/stagehand/dist/esm/lib/v3/`. The class
+exported as `Stagehand` is an alias for `V3`; `v3.d.ts` carries the whole method surface and
+`types/public/options.d.ts` carries the constructor options.
+
+> **Corrected against the installed package in feature 13 — the version here is Stagehand 3.7.1,
+> and the API below is not the one this file used to describe.** Two call shapes changed, and
+> `architecture.md` still described a third, older one (`modelName` at the top level,
+> `modelClientOptions`, `stagehand.page`). Both files now match the types.
+>
+> - **`extract` and `act` take positional arguments, not an options object.**
+>   `extract(instruction, schema, options)` — *not* `extract({ instruction, schema })`, which
+>   silently reads as the no-argument "return the page text" overload.
+>   `act(instruction, options)` — *not* `act({ action })`.
+> - **There is no `stagehand.page`.** It is `stagehand.context.activePage()`, which returns
+>   `Page | undefined` — the `!` this file used to carry hides a real branch.
+> - `page.goto(url, { waitUntil, timeoutMs })` — the option is `timeoutMs`, not `timeout`.
 
 ### Initialisation
 
@@ -383,23 +419,38 @@ const stagehand = new Stagehand({
   apiKey: process.env.BROWSERBASE_API_KEY!,
   projectId: process.env.BROWSERBASE_PROJECT_ID!,
   browserbaseSessionID: session.id,
-  model: { modelName: "openai/gpt-4o", apiKey: process.env.OPENAI_API_KEY! },
+  // The model name is the plain 'gpt-4o' this project pins in lib/openai.ts —
+  // no 'openai/' prefix, which is the AI-SDK provider form and not what the
+  // OpenAI client here wants.
+  model: { modelName: OPENAI_MODEL, apiKey: process.env.OPENAI_API_KEY! },
   disablePino: true,
+  verbose: 0,
 });
 
 await stagehand.init();
-const page = stagehand.context.activePage()!;
+
+const page = stagehand.context.activePage();
+
+if (page === undefined) {
+  // A session that came up without a page. Degrade — do not assert.
+}
 ```
+
+`lib/stagehand.ts` owns this and returns `null` rather than throwing, the same call
+`lib/openai.ts` and `lib/browserbase.ts` make: a browser that will not start is a thinner
+dossier, not a failed request.
 
 ### extract()
 
 ```typescript
 import { z } from "zod";
 
-const result = await stagehand.extract({
-  instruction:
-    "Extract the company overview, main product description, and any technology mentions from this page.",
-  schema: z.object({
+// Positional: (instruction, schema, options). Passing one object instead
+// resolves to the `extract(options)` overload, which ignores the schema and
+// returns { pageText } — a shape mismatch that only shows up at runtime.
+const result = await stagehand.extract(
+  "Extract the company overview, main product description, and any technology mentions from this page.",
+  z.object({
     companyOverview: z.string().optional(),
     mainProduct: z.string().optional(),
     techMentions: z.array(z.string()).optional(),
@@ -412,17 +463,16 @@ const result = await stagehand.extract({
       )
       .optional(),
   }),
-});
+  { timeout: 45_000 },
+);
 ```
 
 ### act()
 
 ```typescript
-// Always wrap in try/catch
+// Always wrap in try/catch. Positional again — act(instruction, options).
 try {
-  await stagehand.act({
-    action: "Click the About link in the navigation",
-  });
+  await stagehand.act("Click the About link in the navigation");
 } catch (error) {
   await logAgentError(jobId, null, error);
 }
@@ -441,11 +491,10 @@ Job description and user profile come from DB — never re-fetch what you alread
 Browser's only job is the company website.
 
 ```typescript
-// Step 1 — Homepage extraction
-const homepageData = await stagehand.extract({
-  instruction:
-    "This is a company's homepage. Capture what the company actually does, who it's for, and any concrete signals (funding, customers, scale, mission, recent launches). Then find the internal links most worth visiting to research them as an employer.",
-  schema: z.object({
+// Step 1 — Homepage extraction. Positional (instruction, schema, options).
+const homepageData = await stagehand.extract(
+  "This is a company's homepage. Capture what the company actually does, who it's for, and any concrete signals (funding, customers, scale, mission, recent launches). Then find the internal links most worth visiting to research them as an employer.",
+  z.object({
     oneLiner: z.string().describe("What the company does in one sentence"),
     productSummary: z
       .string()
@@ -470,7 +519,7 @@ const homepageData = await stagehand.extract({
       )
       .describe("Internal links worth visiting"),
   }),
-});
+);
 
 // If oneLiner and productSummary are empty — wrong site or parked domain
 // Skip to synthesis with job description and profile only
@@ -480,10 +529,9 @@ if (!homepageData.oneLiner && !homepageData.productSummary) {
 }
 
 // Step 2 — Sub-page extraction (max 3, prefer about/blog/engineering/product over careers)
-const subPageData = await stagehand.extract({
-  instruction:
-    "Extract substance that helps a candidate understand this company before applying: what they do, their values and how they work, the specific technologies and tools they use, notable projects or customers, and how the team operates. Ignore nav, footers, cookie banners, and generic marketing copy.",
-  schema: z.object({
+const subPageData = await stagehand.extract(
+  "Extract substance that helps a candidate understand this company before applying: what they do, their values and how they work, the specific technologies and tools they use, notable projects or customers, and how the team operates. Ignore nav, footers, cookie banners, and generic marketing copy.",
+  z.object({
     keyPoints: z.array(z.string()),
     technologies: z
       .array(z.string())
@@ -495,7 +543,7 @@ const subPageData = await stagehand.extract({
       .array(z.string())
       .describe("Customers, funding, scale, projects, awards"),
   }),
-});
+);
 
 // Step 3 — GPT-4o synthesis (after browser closes)
 // Feed three data sources: company research + job from DB + profile from DB
@@ -614,7 +662,13 @@ const result = JSON.parse(response.choices[0].message.content!);
 **Max tokens:**
 
 - Job matching + scoring: `300`
-- Company research synthesis: `800`
+- Company research synthesis: `1600` — **was `800`, and 800 does not fit the answer.** The dossier
+  is nine fields, six of them arrays of one-to-two-sentence items; a complete one measures
+  1,100-1,400 tokens. The ceiling decides whether the response completes, and hitting it truncates
+  mid-object so `JSON.parse` throws — losing a dossier a Browserbase session was already spent
+  producing. `agent/synthesis.ts` also caps each array at four items in the prompt, so the answer
+  sits well inside the raised ceiling rather than against it.
+- Job posting extraction (the description backfill): `1200`
 - Resume generation: `1000`
 - Profile extraction from resume: `800`
 

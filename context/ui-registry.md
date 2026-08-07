@@ -267,9 +267,14 @@ size-4 animate-spin rounded-full border-2 border-current border-t-transparent
 `border-current` inherits the button's text colour, so it needs no token of its own. Reuse this
 spinner for any pending button rather than adding a spinner dependency.
 
-### ComingSoon — `components/layout/ComingSoon.tsx`
+### ~~ComingSoon~~ — deleted in feature 14
 
-File: `components/layout/ComingSoon.tsx`
+**The component no longer exists.** It was scaffolding for protected routes that had no page yet, to
+be deleted as each usage landed; feature 14 took the last one (`/dashboard`), so the file went with
+it. The entry is kept because two recipes below are referenced elsewhere in this document — the Auth
+shell's history, and the eyebrow-vs-field-label split it shares with `ErrorState`.
+
+File: ~~`components/layout/ComingSoon.tsx`~~
 Last updated: 2026-07-31
 
 | Property         | Class                                                      |
@@ -1048,15 +1053,21 @@ full, says who cut it and where the rest is.** Silence reads as a bug.
 ### CompanyResearch — `components/job-details/CompanyResearch.tsx`
 
 File: `components/job-details/CompanyResearch.tsx`
-Last updated: 2026-08-02 (feature 12)
+Last updated: 2026-08-02 (feature 13)
 
 | Property         | Class                                                                |
 | ---------------- | -------------------------------------------------------------------- |
 | Card             | `overflow-hidden rounded-xl border border-border bg-surface shadow-sm` — the **list variant** |
-| Header row       | `flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between` |
+| Header row       | `flex flex-col gap-4 p-6 sm:flex-row sm:items-start sm:justify-between` |
 | Divider          | `border-t border-border` on the body, edge to edge                   |
-| Icon chip        | `grid size-9 place-items-center rounded-lg bg-accent-muted text-accent` |
+| Icon chip        | `grid size-9 place-items-center rounded-lg bg-accent-muted text-accent-dark` |
 | Empty state      | `flex flex-col items-center border-t border-border px-6 py-16 text-center` |
+| Dossier body     | `border-t border-border px-6 pt-6 pb-6`                              |
+| Section label    | `text-xs font-medium tracking-wider text-text-secondary uppercase` — `MatchScore`'s eyebrow |
+| Section icon     | `size-4 text-text-muted`, or `size-4 text-accent-dark` on the highlight |
+| Bullet           | `mt-2 size-1.5 shrink-0 rounded-full bg-text-muted` — `bg-accent` on the highlight |
+| Tech stack chip  | `inline-flex items-center rounded-full bg-surface-secondary px-3 py-1 text-xs font-medium text-text-secondary` |
+| Sources link     | `text-xs break-all text-text-secondary underline underline-offset-2` |
 
 **Pattern notes:**
 
@@ -1069,10 +1080,73 @@ Last updated: 2026-08-02 (feature 12)
 - **Empty state reuses `JobsTable`'s recipe** — `size-12` bordered circle, then a
   `text-sm font-medium text-text-primary` line and muted copy — but adds the bold line above the
   muted sentence, because this empty state has a CTA to point at and the table's does not.
-- **The button is inert until feature 13.** Feature 12 is the full-UI feature and 13 is the agent,
-  the same split feature 09 and feature 10 made on Find Jobs. `company_research` is deliberately not
-  even selected by the read: a card that renders "No research yet" over a dossier that exists would
-  be worse than one that cannot render a dossier at all.
+- **Feature 13 wired the button.** The read, the dossier markup and the handler landed in one
+  change, so the card never reports "No research yet" over a dossier that exists. The button is now
+  in `ResearchButton.tsx` — see below.
+- **`text-accent-dark` on the icon chip, not `text-accent`.** Third time this project has hit the
+  rule: a fill colour is not the colour that goes on top of it. Same correction feature 12's review
+  made to the gap-skill chips, applied here for the same reason.
+- **Every section renders only if it has content, and there are nine of them.** A run whose browser
+  found a parked domain still writes a dossier, but a thin one; laying out eight headings over four
+  filled fields advertises data that is not there. Same rule as `JobDescription`.
+- **Your Edge is the only highlighted section** — accent icon and accent bullets, rendered first.
+  `build-plan.md` calls it the most valuable field, and it is the only one written about the
+  candidate rather than about the company.
+- **The section labels are eyebrows, not headings.** These are labels over blocks inside one card,
+  so they take `MatchScore`'s eyebrow rather than `JobDescription`'s `text-base font-semibold` — the
+  card already has exactly one of those, at the top.
+- **Sources render only when a browser actually visited something.** They are the pages the agent
+  read, not pages the model named, and they pass `safeExternalUrl` inside `lib/dossier.ts` before
+  they can become `href`s.
+
+### DossierSection — `components/job-details/DossierSection.tsx`
+
+File: `components/job-details/DossierSection.tsx`
+Last updated: 2026-08-02 (feature 13)
+
+One bulleted section of the dossier card — icon, eyebrow label, bullet list. Five of the nine
+dossier fields render through it.
+
+| Property   | Class                                                              |
+| ---------- | ------------------------------------------------------------------ |
+| Wrapper    | `mt-6`                                                             |
+| Icon       | `size-4 text-text-muted` — `text-accent-dark` when highlighted      |
+| Label      | `text-xs font-medium tracking-wider text-text-secondary uppercase`  |
+| Bullet     | `mt-2 size-1.5 shrink-0 rounded-full bg-text-muted` — `bg-accent` when highlighted |
+| Item       | `flex items-start gap-3 text-sm leading-6 text-text-primary`        |
+
+**Pattern notes:**
+
+- **Its own file, not a helper inside `CompanyResearch`.** `code-standards.md` puts one component
+  per file, and a second component in the card file was the review's finding.
+- **`highlight` is a one-section prop.** Only Your Edge sets it, and it is the only dossier section
+  written about the candidate rather than the company.
+- Takes a `LucideIcon`, not `typeof SomeIcon` — the library exports the type, and borrowing a
+  concrete icon's type to stand in for it reads as an accident.
+
+### ResearchButton — `components/job-details/ResearchButton.tsx`
+
+File: `components/job-details/ResearchButton.tsx`
+Last updated: 2026-08-02 (feature 13)
+
+`"use client"`. The only client boundary on the job details page — it exists for the click and the
+request, not for the content, which stays server-rendered.
+
+**Pattern notes:**
+
+- **The pill survives:** `Button` with `rounded-full`, still the only pill in the app. It switches to
+  `variant="secondary"` and "Refresh research" once a dossier exists, so re-running is offered
+  without competing with Apply Now for primary weight.
+- **The spinner is the button's own icon** — `animate-spin` on the lucide icon rather than a separate
+  element, the same treatment `SearchControls` gives its label.
+- **It says how long, not just that it is working.** A run opens a cloud browser and reads up to four
+  pages; a bare spinner on something that slow reads as hung. `role="status"` under the button, muted
+  and `text-xs`, right-aligned with it on `sm:`.
+- **No success banner.** The card filling in with the dossier is the confirmation — a banner over it
+  would say less than the thing it sat on top of. Errors still get one: `role="alert"` in the
+  standing `border-error/30 bg-error/10` treatment.
+- **`router.refresh()` after a successful run**, because the dossier is server-rendered from the
+  `jobs` row — the same pattern `SearchControls` and `ResumeUpload` use.
 
 ### JobActions — `components/job-details/JobActions.tsx`
 
@@ -1141,3 +1215,173 @@ and free here — the route is behind auth and nothing crawls it.
 `AppNavbar` + `main.flex-1.bg-background` + `mx-auto w-full max-w-4xl space-y-6 px-6 py-8`.
 `max-w-4xl` rather than the 1440px page container: a form is a reading column, and the design draws
 it at roughly 940px in a 1470px viewport.
+
+### StatCard — `components/dashboard/StatCard.tsx`
+
+File: `components/dashboard/StatCard.tsx`
+Last updated: 2026-08-03 (feature 14)
+
+| Property         | Class                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| Card             | the standard card recipe                                       |
+| Label            | `text-sm font-medium text-text-secondary`                      |
+| Number           | `mt-2 text-3xl leading-9 font-semibold text-text-primary`      |
+| Trend badge      | `rounded-sm px-2 py-0.5 text-xs font-medium` + a tone            |
+| Trend — rising   | `bg-success-lightest text-success-darker`                       |
+| Trend — falling  | `bg-error/10 text-error-dark`                                   |
+| Trend — flat     | `bg-surface-secondary text-text-secondary`                      |
+| Caption          | `text-xs text-text-muted`                                      |
+
+**Pattern notes:**
+
+- **The one badge on this project that is not a pill.** `ui-rules.md` gives trend badges
+  `rounded-sm` deliberately: pills are status and score badges, and a delta is neither.
+- **A trend has three tones, because a trend can go down.** The design only ever draws a rise and the
+  first cut hardcoded the green — which `/review` caught: feature 15 computes these from real
+  week-on-week counts, so a week where jobs found fell would have rendered "-8%" in success colours.
+  The red pair is `bg-error/10` + `text-error-dark`, the same one `CompletionIndicator`'s
+  missing-field tags use — `--color-error` on its own tint is 3.3:1, under the AA floor. **Fourth
+  time this project has hit it: a fill colour is not the colour that goes on top of it.**
+- **`trend` is nullable and two of the four cards pass null.** The design gives Companies Researched
+  and Jobs This Week a plain subtitle. A card with no week-on-week comparison to make says what its
+  number is rather than inventing a change. The caption slot renders either way, so all four cards
+  keep the same three-line rhythm.
+- `text-3xl leading-9` is the 30px/36px stat-number step in `ui-tokens.md` — the only place on an app
+  page that goes above the section-heading size.
+
+### StatsBar — `components/dashboard/StatsBar.tsx`
+
+`grid gap-6 sm:grid-cols-2 lg:grid-cols-4` over `StatCard`. Carries an `aria-label` because it is a
+`section` with no visible heading — the design draws four cards and no title above them.
+
+### RecentActivity — `components/dashboard/RecentActivity.tsx`
+
+File: `components/dashboard/RecentActivity.tsx`
+Last updated: 2026-08-03 (feature 14)
+
+| Property         | Class                                                              |
+| ---------------- | ------------------------------------------------------------------ |
+| Card             | `overflow-hidden rounded-xl border border-border bg-surface shadow-sm` — the **list variant** |
+| Heading          | `p-6 text-base font-semibold text-text-primary`                    |
+| Body             | `space-y-6 border-t border-border p-6`                             |
+| Dot ring         | `mt-1 grid size-4 shrink-0 place-items-center rounded-full` + tint  |
+| Dot core         | `size-2 rounded-full` + fill                                        |
+| Connector        | `absolute top-6 -bottom-6 left-2 w-px -translate-x-1/2 bg-border`    |
+| Message          | `text-sm font-medium text-text-primary`                            |
+| Timestamp        | `mt-1 text-xs text-text-muted`                                     |
+
+**Pattern notes:**
+
+- **Third use of the list-variant card**, after the jobs list and `CompanyResearch`. The design draws
+  a rule spanning the card edge to edge under the heading, so padding lives on the heading and on the
+  body rather than on the card.
+- **The connector is `-bottom-6`, which is exactly the `space-y-6` gap**, so it stops one gap short
+  of the next dot instead of running behind it. The timeline reads as connecting the entries rather
+  than as a rule the dots sit on, and it needs no per-item measurement.
+- **Two dot colours, not the three in `ui-tokens.md`** — see the correction note there. `search` is
+  the green pair, `research` the blue. The design's purple dots are the resume-tailoring colour and
+  land on rows of both types; they were not reproduced.
+- **Timestamps are `formatRelativeTime()` over an ISO instant**, not the strings the design shows.
+  Same split feature 09 made on the Date Found column: feature 16 changes the data source and no
+  formatting. It renders "10 minutes ago" where the design draws "10 mins ago" — there is one
+  relative-time formatter on this project and it is already the one the jobs table uses.
+- Empty state is `JobsTable`'s recipe — `size-12` bordered circle, `mt-4 max-w-sm text-sm
+  text-text-muted` copy, no CTA. `ui-rules.md` requires one; the design does not draw it.
+
+### ChartCard — `components/dashboard/ChartCard.tsx`
+
+File: `components/dashboard/ChartCard.tsx`
+Last updated: 2026-08-03 (feature 14)
+
+The frame all three charts share: card, title, dashed grid, value axis, category labels. The marks
+are the child, so a bar series and a line series cannot drift apart on anything but the marks.
+
+| Property         | Class                                                              |
+| ---------------- | ------------------------------------------------------------------ |
+| Card             | `flex h-full flex-col` + the standard card recipe                  |
+| Title            | `text-base font-semibold text-text-primary` (a `figcaption`)       |
+| Frame            | `mt-8 flex flex-1 flex-col pl-10` — `pl-10` is the axis gutter     |
+| Plot             | `relative min-h-60 flex-1`                                         |
+| Grid line        | `absolute inset-x-0 top-0 border-t border-dashed border-border`    |
+| Axis label       | `absolute top-1/2 right-full -translate-y-1/2 pr-3 text-xs text-text-muted` |
+| Category label   | `text-xs whitespace-nowrap text-text-muted`                        |
+| Empty state      | `flex min-h-60 flex-1 flex-col items-center justify-center px-6 py-10 text-center` |
+
+**Pattern notes:**
+
+- **The grid rows are `h-0`.** `flex flex-col-reverse justify-between` over five zero-height rows
+  lands them on exactly 0/25/50/75/100% of the plot. Rows with a line-height would space themselves
+  by their own box edges instead, and the top and bottom lines would sit inside the plot rather than
+  on it. `flex-col-reverse` because the ticks run upwards and the array runs from zero.
+- **`min-h-60 flex-1`, not a fixed height.** The plot absorbs whatever extra height the grid row
+  gives the card, so a chart beside a taller card stretches to meet it — which is what the design
+  draws next to Recent Activity — instead of leaving dead space under the axis.
+- **Two category-label placements, and they are not interchangeable.** `slot` gives each label an
+  equal `flex-1` share and centres it, which is where a bar sits. `point` positions them at
+  `i / (n - 1)` so the first and last land on the plot edges, which is where the line chart's first
+  and last points are. Using `slot` for the line would inset the curve from both edges.
+- **`whitespace-nowrap` on the category labels is load-bearing**, not tidying: the score buckets
+  ("50-60%") break at their hyphen and wrap to two lines in the narrow card without it. Caught in the
+  browser, not by reading.
+- **`figure` / `figcaption`, not `section` / `h2`.** The title names a graphic, and the graphic
+  carries its own `sr-only` value list — see below.
+- **`emptyMessage` replaces the whole frame, it does not sit on top of it.** An axis with no marks
+  under it is indistinguishable from a chart that failed to draw, so an all-zero series gets the
+  standard centred empty state — `size-12` bordered circle, `mt-4 max-w-xs text-sm text-text-muted`
+  copy — and no grid at all. `hasPlottableData()` in `lib/charts.ts` is the single decision, so the
+  three charts cannot disagree about what "empty" means. Added by `/review`.
+
+### BarChart / LineChart — `components/dashboard/{BarChart,LineChart}.tsx`
+
+File: `components/dashboard/BarChart.tsx`, `components/dashboard/LineChart.tsx`
+Last updated: 2026-08-03 (feature 14)
+
+Both take `ChartPoint[]`, derive their axis through `chartScale()` in `lib/charts.ts`, and render
+into `ChartCard`. **There is no charting library** — see the correction on `build-plan.md` feature 17.
+
+| Element        | Class                                                              |
+| -------------- | ------------------------------------------------------------------ |
+| Bar slot       | `flex h-full flex-1 items-end justify-center`                      |
+| Bar            | `w-[46%]` + `bg-info` or `bg-success`                              |
+| Line plot      | `absolute inset-0 h-full w-full overflow-visible`                  |
+| Line stroke    | `stroke-accent`, `strokeWidth="3"`, `vectorEffect="non-scaling-stroke"` |
+
+**Pattern notes:**
+
+- **Percentages are the project's second sanctioned inline style**, after `JobsTable`'s score-bar
+  fill and for the same reason: a bar height is a value, not a token, and there is no class for
+  41.67%. `code-standards.md`'s no-inline-styles rule is about styling.
+- **Every bar slot is `h-full`.** Sizing slots to their content instead makes the bar's percentage
+  height resolve against an auto box, and every bar collapses to zero. This is the one thing to
+  preserve if the layout is ever reworked.
+- **`preserveAspectRatio="none"` is what makes a fixed 0-100 viewBox responsive** — the curve
+  stretches to the card's width. `vector-effect="non-scaling-stroke"` is what keeps the stroke an
+  even 3px through that stretch, and it is not optional: without it the line thins and the round caps
+  go elliptical as the card widens. `overflow-visible` stops the caps clipping at the plot edges.
+- **Both take `emptyMessage` and hand it to `ChartCard`** when `hasPlottableData()` is false. The
+  message is the caller's, because "no companies researched yet" and "no jobs found yet" point at
+  different next actions; the *decision* is shared so the three charts cannot disagree.
+- **Keys are `label-index`, not `label`.** A grouped series can legitimately repeat a bucket name,
+  and a duplicate React key silently drops a bar. Hardened by `/review`.
+- **Gradient stops take `var(--color-accent)` as an attribute**, since Tailwind has no `stop-color`
+  utility. Same rule as the decorative-glow primitive: a token through `var()`, never a hex.
+- **The values are readable, not just visible.** Both charts render an `sr-only` `ul` of
+  `label: value` and mark the graphic `aria-hidden`, so a screen reader gets the data once rather
+  than a chart it cannot see or a pile of unlabelled bars.
+- **The gradient id is a module constant, not `useId()`** — hooks are unavailable in a Server
+  Component. There is one line chart; give it a prop the day there are two.
+
+### Dashboard page — `app/dashboard/page.tsx`
+
+`AppNavbar active="dashboard"` + `main.flex-1.bg-background` + the full-width page container
+`mx-auto w-full max-w-[1440px] space-y-6 px-6 py-8`, then the optional completion banner, the stats
+bar, and two chart rows: `grid gap-6 lg:grid-cols-2` and `grid gap-6 lg:grid-cols-3` with the line
+chart on `lg:col-span-2`.
+
+**The 1440px container, like `/find-jobs` and unlike `/profile`.** A dashboard is scanned across.
+
+**`CompletionIndicator` is reused from `components/profile/`**, and only when the profile is
+incomplete. It takes plain props and computes nothing, so it needed no change — but it is now shared
+by two pages, which is worth knowing before editing it for either.
+
+**Zero Client Components.** Every chart is markup and every value is server-rendered.

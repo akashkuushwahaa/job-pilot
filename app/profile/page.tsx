@@ -4,28 +4,15 @@ import { ProfileWorkspace } from "@/components/profile/ProfileWorkspace";
 import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
 import { createInsforgeServer } from "@/lib/insforge-server";
-import { parseProfile } from "@/lib/profile";
+import { fetchProfile } from "@/lib/profile";
 
 export default async function ProfilePage() {
   const user = await requireUser();
   const insforge = await createInsforgeServer();
 
-  // There is no row until the first save — maybeSingle() returns null rather than
-  // erroring, and completeness() takes null directly.
-  const { data, error } = await insforge.database
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  // Deliberately fatal. Degrading a read failure to "no profile" would render an
-  // empty form over real saved data, and the next save would overwrite it.
-  if (error) {
-    console.error("[profile/page] read failed", error);
-    throw new Error("Profile unavailable");
-  }
-
-  const profile = parseProfile(data);
+  // Null until the first save, and fatal on a read failure — both decided in
+  // fetchProfile, which /dashboard shares.
+  const profile = await fetchProfile(insforge, user.id, "profile/page");
   const { percent, missing, isComplete } = completeness(profile);
 
   return (

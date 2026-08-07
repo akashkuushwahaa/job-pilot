@@ -6,18 +6,20 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 4 — Job Details Page, in progress
-**Last completed:** 12 Job Details Page — Full UI. `/find-jobs/[id]` renders the whole job from the
-`jobs` row: header, four fact cards, GPT-4o's reasoning, both skill lists, the description and the
-Apply action. Company Research is the empty state only — feature 13 owns the agent and the button's
-handler. The table rows link now, closing the one placeholder feature 09 left. **Not yet run in a
-browser** — see Feature 12 below.
+**Phase:** Phase 5 — Dashboard, in progress
+**Last completed:** 14 Dashboard Page — Full UI. `/dashboard` renders the four stat cards, the
+Recent Activity timeline and all three charts on mock data, plus the incomplete-profile banner. The
+charts are hand-rolled markup and SVG — there is no charting dependency, and the whole page is
+server-rendered. This deleted the last `ComingSoon` stub.
 **Open defect, carried:** searching a country the app does not support returns confidently wrong
 results rather than nothing — "India" was scored as Indianapolis. Details in Notes. It was flagged
 "fix before feature 11", was not fixed then either, and is now the oldest open item — a second run
 has since added ten more US rows.
-**Next:** 13 Company Research Agent. It wires the Research Company button, writes
-`jobs.company_research`, and replaces the empty state with the nine-field dossier.
+**Also carried:** feature 13's research agent has never actually run. No Browserbase session has been
+created from this codebase, so the browse phase, both extraction schemas, the synthesis prompt and
+the dossier card's rendering are all unexercised. `feat/13-company-research` is unmerged.
+**Next:** 15 Stats Bar — Real Data. It replaces `mockStats()` in `lib/dashboard.ts` with four counts
+against the user's own rows and touches no component.
 
 ---
 
@@ -46,11 +48,11 @@ has since added ten more US rows.
 ### Phase 4 — Job Details Page
 
 - [x] 12 Job Details Page — Full UI
-- [ ] 13 Company Research Agent
+- [x] 13 Company Research Agent
 
 ### Phase 5 — Dashboard
 
-- [ ] 14 Dashboard Page — Full UI
+- [x] 14 Dashboard Page — Full UI
 - [ ] 15 Stats Bar — Real Data
 - [ ] 16 Recent Activity — Real Data
 - [ ] 17 Analytics Charts — PostHog Data
@@ -988,6 +990,135 @@ what closes features 11 and 12.
 
 ---
 
+### Feature 13 — Company Research Agent
+
+The Research Company button feature 12 shipped inert now runs, and the same run backfills the job
+description. One click, one job, one Browserbase session.
+
+**Built**
+
+- `app/api/agent/research/route.ts` — POST `{ jobId }`. Auth, uuid check, the job read scoped to the
+  caller, the same completeness gate `/api/agent/find` applies, then the run. Exports
+  `maxDuration = 300`.
+- `agent/research.ts` — the orchestrator. Resolve → backfill → browse → synthesise → save.
+- `agent/posting.ts` — follows the Adzuna redirect. Produces both the employer homepage URL and the
+  posting HTML the backfill reads. Also `rootDomain`, `homepageFor`, `htmlToText`, `extractPosting`.
+- `agent/browsing.ts` — the Stagehand phase. Homepage extract, sub-page ranking, up to three visits.
+- `agent/synthesis.ts` — GPT-4o dossier from research + job + profile.
+- `lib/browserbase.ts`, `lib/stagehand.ts` — session creation and client init. Both return `null`
+  rather than throwing.
+- `lib/dossier.ts` — the dossier zod schema, used on write *and* on read.
+- `components/job-details/CompanyResearch.tsx` rewritten to render the nine-field dossier;
+  `ResearchButton.tsx` is the new and only client boundary on the page.
+- `lib/jobs.ts` gained `company_research` in both the select and `JobDetailSchema`; `types/index.ts`
+  gained `CompanyDossier`.
+- Corrected in `library-docs.md` and `architecture.md`: the Stagehand API, the `maxDuration` advice,
+  and the synthesis token budget. All three are recorded below.
+
+**Decisions**
+
+- **Every phase before the synthesis may fail without ending the run.** The deliverable is a
+  dossier; GPT-4o can write one from the job and the profile alone. Only a missing or unsaveable
+  dossier is a failure the user hears about.
+- **The homepage comes from the redirect, and the ATS domains are refused.** `boards.greenhouse.io`
+  stripped to its root domain is Greenhouse — the browser would research the ATS vendor and report
+  its culture as the employer's. `NOT_THE_EMPLOYER` in `agent/posting.ts` sends those to the
+  company-name guess instead, which is wrong less often.
+- **The backfill shares the dossier's fetch.** The redirect hop has to happen anyway to find the
+  employer; the posting body is on the page it lands on. No second scraper.
+- **The truncation note in `JobDescription` was kept, not deleted.** `build-plan.md` said to delete
+  it in the change that fills the column. It keys on the ellipsis rather than on a feature flag, so
+  a successful backfill removes it by itself and a failed one leaves it true. Deleting it would have
+  lied on every job the backfill cannot reach. Verified both directions.
+- **`sources` is set from the pages actually visited, never asked of the model.** A model asked to
+  name its sources produces plausible URLs, and these render as links.
+- **The dossier is parsed on read as well as on write.** `jsonb` is unchecked by Postgres, so the
+  column is exactly as untrusted as the model response was.
+- No new PostHog event. `company_researched` was already in `code-standards.md`; it now fires.
+
+**Verified by execution** — 32 checks over the pure logic, all passing:
+
+- `rootDomain` across plain, `www`, deep-subdomain, `.co.uk` and `.com.au` hosts, plus a bare label.
+- `homepageFor` with an employer domain, Greenhouse, Workday, Adzuna itself, no landed URL at all,
+  and an unusable company name.
+- `htmlToText` dropping script contents, resolving entities, and — after a fix this pass — not
+  leaving every paragraph indented by one space.
+- `parseDossier` over a clean dossier, `null`, `undefined`, a bare string, an array, `{}`, an
+  all-empty dossier, and a drifted one where a string arrived where an array belonged. Each drifted
+  field degrades alone; the good fields survive. A `javascript:` URL in `sources` is dropped and a
+  duplicate collapsed.
+- `fetchJob` over an untouched row, a researched-and-backfilled row, junk jsonb and a string in the
+  jsonb column. Confirms `company_research` is in the select, survives the parse, and that
+  `isTruncatedDescription` is `true` before the backfill and `false` after.
+
+`npx tsc --noEmit`, `npm run lint` and `npm run build` all clean; `/api/agent/research` registered.
+
+**Not verified — the whole run has never executed.** No Browserbase session has ever been created
+from this codebase, so the browser phase, the extraction schemas, the synthesis prompt, the dossier
+card's rendering and the `company_researched` event are all unexercised. One real click is what
+closes this feature, and it costs a Browserbase session plus two GPT-4o calls.
+
+---
+
+### Feature 13 — issues found by `/review` and fixed
+
+Nine, all closed in the same pass. Three of them are rules, not patches.
+
+- **The company-name fallback mangled ordinary names.** The suffix regex was unanchored with a `\s*`
+  that matches nothing, so `co\.?\b` matched *inside* a name and took everything after it: **Cisco
+  Systems → `cis.com`, Costco Wholesale → `cost.com`, Tesco PLC → `tes.com`, Nordco Industries →
+  `nord.com`.** Every one is a real domain, so the browser would have researched a different company
+  and reported it as the employer, with `sources` linking to it — the same failure
+  `NOT_THE_EMPLOYER` exists to prevent, arriving from the other direction. The separator is now
+  required and the match anchored to the end, and it loops for "Acme Holdings Pty Ltd". Caught by
+  running the function over a list of real names, not by reading it.
+- **SSRF through `jobs.source_url`.** The redirect-follow fetched a DB column server-side with
+  `redirect: "follow"`, and `safeExternalUrl` checks only the scheme. The `jobs_owner` policy is
+  `ALL`, so any signed-in user could insert a row pointing at `169.254.169.254` or a loopback port,
+  click Research, and have the response structured by GPT-4o and rendered back to them. New in
+  feature 13 — feature 10 never fetched this column. `lib/safe-fetch.ts` now resolves the hostname
+  and refuses loopback, link-local, RFC 1918, CGNAT and IPv4-mapped-IPv6, **re-checking every
+  redirect hop** because passing the first host check says nothing about where a 302 points. Now an
+  `architecture.md` invariant.
+- **A Browserbase session leaked whenever Stagehand failed to init.** `stagehand.close()` releases
+  the session it owns — but on a failed init there is no client to close, and the session held the
+  free plan's only slot for its full 120 seconds. The next click would find the browser unavailable
+  for a reason nothing logs. `releaseSession()` sends `REQUEST_RELEASE` on that path only.
+- **A refresh could cost the user what the first run bought.** A second run whose browser failed
+  would overwrite a researched dossier with one inferred from the posting. Now: the backfill only
+  writes a column that is currently empty or still holds the snippet, and a browsed dossier
+  (`sources` non-empty) is never replaced by a synthesis-only one. **A re-run can only add.**
+- **An all-empty dossier reported as a failure.** `parseDossier` answered `null` for both "not a
+  dossier" and "a dossier that says nothing", so a run that worked told the user it had failed.
+  `readDossier` now returns three outcomes and the user gets "found too little about this company"
+  instead of "could not research".
+- **The browser phase had no overall bound.** Four visits at the per-step limits could run past two
+  minutes — longer than the Browserbase session itself. `BROWSE_BUDGET_MS` stops visiting sub-pages
+  once spent; what was gathered still goes to synthesis.
+- **`maxDuration = 300` is a ceiling the host may not honour.** Vercel Hobby caps at 60s. Documented
+  at the export, with the supported fallback: leave `BROWSERBASE_*` unset and every run synthesises
+  from the posting and profile alone.
+- Two style fixes: `z.uuid()` for the Zod 4 form, and `DossierSection` extracted to its own file
+  under the one-component-per-file rule, using `cn()` rather than bare ternaries.
+
+**Verified by execution** — 40 checks, all passing, plus a positive control:
+
+- The six names the old regex mangled now resolve correctly, and the suffixes that *should* strip
+  still do (`Marlabs LLC`, `Stripe Inc.`, `Wipro Limited`, `Acme Holdings Pty Ltd`). "Pty Digital"
+  keeps its name instead of returning null.
+- `safeFetchExternal` refuses all 14 of: the metadata endpoint, loopback v4 and v6, localhost by
+  name, three RFC 1918 ranges, CGNAT, IPv4-mapped IPv6, a bare hostname, `.internal`, `.local`,
+  `file:` and `javascript:`.
+- **Positive control:** `https://example.com` and a live `http://github.com` redirect chain both
+  still fetch and return 200. Every other check asserts a refusal, and a guard that refused
+  everything would have passed all of them.
+- `readDossier` returns the right one of three outcomes across five shapes; `wasBrowsed` separates a
+  browsed dossier from a synthesis-only one.
+
+`npx tsc --noEmit`, `npm run lint` and `npm run build` all clean afterwards.
+
+---
+
 ## Notes
 
 _Add notes here as the build progresses — workarounds, patterns, anything that differs from the context files._
@@ -1129,3 +1260,144 @@ _Add notes here as the build progresses — workarounds, patterns, anything that
   - **Google OAuth has not run since the feature-03 fixes.** Both cycles here were GitHub.
   - **Cross-user RLS isolation is still unproven** — `auth.users` holds one user, and admin tooling
     refuses `SET ROLE`. Needs a genuine second signed-in account.
+
+### Feature 14 — Dashboard Page (Full UI)
+
+UI only, on mock data, exactly as the build plan scopes it. `/dashboard` was the last `ComingSoon`
+stub; all three are now gone.
+
+**Found while reading the plan, and it changed the feature:** two of the five surfaces build-plan 14
+lists are from the cut feature set. The fourth stat card is **Jobs This Week**, not Cover Letters
+Generated, and the third chart is **Company Research Activity**, not Resume Tailoring Activity — the
+design draws both that way, feature 15 counts jobs in the last 7 days, feature 17 queries
+`company_researched`, and cover letters and resume tailoring are both out of scope in
+`project-overview.md`. Three sources against one stale line each. Same class of drift as feature 05's
+Cover Letter Tone and feature 01's `agnet-log.png`. `build-plan.md` corrected.
+
+Decisions:
+
+- **No charting library, and recharts was not installed.** `build-plan.md` feature 17 names it and
+  `code-standards.md` does not list it. All three charts are static — no tooltips, no legends, no
+  brushing — and every recharts default (axis lines, tick styling, bar radius, grid stroke) would
+  have had to be overridden to reach the design anyway, while making all three Client Components.
+  `code-standards.md` asks "is there a simpler native solution" first; here it is markup plus one
+  `<svg>`. Same call as feature 01 on `class-variance-authority` and feature 05 on the shadcn CLI.
+  **Confirmed with the developer before building**, because feature 17 inherits it.
+- **The geometry lives in `lib/charts.ts`, not in the components.** An axis ceiling and a Bézier
+  control point are things that can be wrong in ways a screenshot does not reveal, so they are
+  functions that can be run. The components only place what those return.
+- **Whole-number data only gets whole-number ticks.** Every series on this dashboard counts things,
+  and the first cut labelled a max of 3 as `0 / 0.75 / 1.5 / 2.25 / 3` — an axis offering ticks that
+  cannot occur. Caught by running `chartScale` over a range of maxima rather than by looking at the
+  three that happen to be in the design. Costs some headroom above the tallest bar; worst case across
+  the ladder is 30%, at a maximum of 28.
+- **Spline control points are clamped into the plot box.** A Catmull-Rom curve through a sharp peak
+  overshoots, and an overshoot inside a `viewBox` does not curve out of frame — it clips flat against
+  the edge, which reads as a rendering fault rather than as data.
+- **`preserveAspectRatio="none"` plus `vector-effect="non-scaling-stroke"`** is what makes a
+  hand-rolled line chart responsive without JavaScript: the 0-100 viewBox stretches to the card and
+  the stroke stays an even 3px through it. Without the second attribute the line thins and its round
+  caps go elliptical as the card widens.
+- **The completion banner renders only when the profile is incomplete.** `CompletionIndicator` is
+  reused from `components/profile/` unchanged — it takes plain props and computes nothing — so it is
+  now shared by two pages.
+- **Timestamps are stored as ISO instants and rendered with `formatRelativeTime()`**, the feature 09
+  pattern: feature 16 changes the data source and no formatting.
+- **The four mock functions are in `lib/dashboard.ts`, one per surface**, so features 15, 16 and 17
+  each replace exactly one of them and touch no component.
+- **Zero Client Components**, like feature 12's job details page. Every chart is markup and every
+  value is server-rendered.
+- **`AnalyticsCharts.tsx` was not built.** `architecture.md` listed it, but the design does not group
+  the three charts — Company Research Activity sits beside Recent Activity and the other two are a
+  row below — so a component wrapping all three would have to render two non-adjacent parts of the
+  page. It is `ChartCard` + `BarChart` + `LineChart` instead, one component per file as
+  `code-standards.md` requires. `architecture.md` corrected.
+- **No new PostHog event.** The list stays at seven.
+
+Found while building:
+
+- **`ui-tokens.md`'s Activity Dots table and Dashboard Chart Colors table were both stale**, naming
+  resume tailoring and cover letters. The chart table also listed raw hex for colours that all had
+  exact tokens, under a document whose first invariant is never to use hex in a component. Both
+  rewritten in tokens.
+- **The design's activity dots do not encode anything.** Purple on rows 1 and 4, blue on row 2, green
+  on rows 3 and 5 — across two entry types, in no consistent pattern, with purple being the
+  out-of-scope tailoring colour. Built to `build-plan.md` feature 16's two-colour rule instead.
+
+**Verified by execution:** 45 checks over `lib/charts.ts` (a temporary script, run under Node's
+type stripping). The three series the design draws produce exactly the axes it draws — `0,3,6,9,12`
+for the research bars and `0,25,50,75,100` for both 85-value charts. Across fourteen maxima from 1 to
+4321 the ceiling is never below the maximum, there are always five ticks, the last tick is always the
+ceiling and every tick is a whole number. Empty, all-zero and all-negative series return a drawable
+axis rather than dividing by zero; `plotPercent` clamps negatives and survives a zero ceiling; the
+line path starts at x=0 and ends at x=100, closes its area along the baseline, keeps every coordinate
+inside the viewBox, and clamps a 0→100→0 spike instead of clipping it. One, two and zero-point series
+all return something sane.
+
+**Browser pass, 2026-08-03 — the page was rendered and read at three widths.** A temporary preview
+route (since deleted, confirmed 404) rendered the components unauthenticated at 1470px, 834px and
+414px. The layout matches the design at full width; the stats bar goes 4 → 2 → 1 and both chart rows
+collapse to single column; the line chart's curve and stroke weight survive the width change, which
+is the whole point of the non-scaling-stroke decision. **One real defect found and fixed:** the score
+buckets ("50-60%") wrapped at their hyphen in the narrow card — `whitespace-nowrap` on the category
+labels. Console clean, no errors or warnings. `tsc`, lint and build all clean, every route still `ƒ`,
+and `/dashboard` still 307s to `/login` while signed out.
+
+**Not verified:** the real `/dashboard` has not been opened in a signed-in browser, so the profile
+read, the `AppNavbar` and the incomplete-profile banner in place have not been seen. The banner will
+not render for this user in any case — the profile is complete, which is why searches have run.
+
+### Feature 14 — issues found by `/review` and fixed
+
+Six findings, all resolved in the same session. Two mattered.
+
+- **Important — one non-finite value silently destroyed an entire chart.** `chartScale`,
+  `plotPercent` and `smoothLinePath` all propagated `NaN` and `Infinity` straight through: the
+  ceiling went `NaN`, all five ticks rendered the literal string "NaN", a bar's height became the
+  invalid CSS `"NaN%"`, and the line's `d` attribute stopped parsing so the curve vanished
+  completely. Nothing threw and nothing logged. **These three functions are the boundary feature 17
+  feeds from PostHog**, which is external input, and the project's standing rule is to narrow at the
+  boundary rather than trust the type — the same rule `parseProfile` and every GPT-4o zod schema
+  exist for. `finiteSeries()` now coerces to zero and logs once per series; `plotPercent` guards both
+  arguments; `smoothLinePath` returns null on a non-finite ceiling. **Found by probing the functions,
+  not by reading them.**
+- **Important — a negative trend rendered green.** `StatCard` hardcoded
+  `bg-success-lightest text-success-darker` while the sign logic beside it
+  (`stat.trend > 0 ? "+" : ""`) explicitly anticipated negatives — so the code handled the sign in one
+  place and not the other. Feature 15 computes these from real week-on-week counts, so a week where
+  jobs found dropped would have shown "-8%" styled as a success. Now three tones: rising green,
+  falling `bg-error/10 text-error-dark` (the pair `CompletionIndicator` already uses, because
+  `--color-error` measures 3.3:1 on its own tint), flat neutral.
+- **Minor — the charts had no empty state.** `build-plan.md` assigns them to feature 17, but
+  `ui-rules.md`'s "every section that can be empty must have an empty state" is project-wide and an
+  all-zero series is reachable the moment real data lands. `ChartCard` takes `emptyMessage` and
+  replaces the whole frame with the standard centred empty state; `hasPlottableData()` decides. An
+  axis with no marks under it is indistinguishable from a chart that failed to draw.
+- **Minor — the all-zero branch hardcoded its ticks.** It returned
+  `{ ceiling: TICK_COUNT, ticks: [0,1,2,3,4] }`, where the ceiling equalling the tick count was a
+  coincidence of step 1. Changing `TICK_COUNT` would have left an axis whose last tick was not its
+  ceiling. Both now derive from one step through `ticksFrom()`.
+- **Minor — the profile read was duplicated verbatim** across `/dashboard` and `/profile`: same
+  query, same fatal-on-error branch, same parse. Extracted to `fetchProfile()` in `lib/profile.ts`,
+  which is where `architecture.md` puts data access — `app/` is pages.
+- **Minor — `ACTIVITY_KINDS` was exported and never read.** `JOB_MATCH_FILTERS` and `JOB_SORTS` are
+  const arrays because the URL parser validates an untrusted string against them at runtime;
+  `ActivityKind` is only ever constructed by the code that builds the entry, so the array had no
+  reader. Now a plain union.
+
+Also hardened while in there: React keys on chart points and category labels are `label-index`
+rather than the label alone, so a series with a repeated bucket name cannot collide.
+
+**Verified by execution:** 32 further checks. The three series the design draws produce byte-identical
+axes to before the fix, so the hardening changed nothing that was already right. `NaN`, `Infinity` and
+`-Infinity` in a series now yield a finite ceiling and five finite ticks; `plotPercent` returns 0 for
+a non-finite value *or* a non-finite ceiling; `smoothLinePath` emits a path containing no "NaN" and
+returns null on a non-finite ceiling; the all-zero branch's last tick is its ceiling;
+`hasPlottableData` is false for all-zero, empty, all-non-finite and negatives-only and true for one
+positive.
+
+**Second browser pass, 2026-08-03.** A temporary preview route (since deleted, confirmed 404)
+rendered all four trend states side by side — `+12%` green, `-8%` red, `0%` neutral, and no badge —
+and both chart empty states. Then the populated dashboard was re-rendered to confirm the `ChartCard`
+restructure broke nothing: grid, both axes, bars, curve and labels all unchanged. Console clean.
+`tsc`, lint and build clean, every route still `ƒ`, `/dashboard` still 307s to `/login`.

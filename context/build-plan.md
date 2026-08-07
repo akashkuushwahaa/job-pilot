@@ -492,6 +492,21 @@ Build the complete dashboard UI with mock data.
 - Match Score Distribution — bar chart (mock data, score ranges 50-60%, 60-70%, 70-80%, 80-90%, 90-100%)
 - Incomplete profile banner at top if profile not complete
 
+> Corrected against `context/designs/dashboard.png` and features 15 and 17 in feature 14.
+> **Two of the five surfaces above are from the cut feature set.** The fourth stat card is
+> **Jobs This Week**, not Cover Letters Generated, and the third chart is **Company Research
+> Activity**, not Resume Tailoring Activity. The design draws both that way, feature 15 counts
+> "Jobs found in last 7 days", feature 17 queries `company_researched`, and cover letters and resume
+> tailoring are both under Features Out of Scope in `project-overview.md`. Three sources against one
+> stale line each.
+> **Only two of the four stat cards carry a trend indicator.** The design gives Companies Researched
+> and Jobs This Week a plain subtitle instead. A card with no week-on-week comparison to make says
+> what its number is rather than inventing a change — `DashboardStat.trend` is nullable for this.
+> **The charts are hand-rolled, not recharts** — see the note on feature 17 below.
+> **The banner renders only when the profile is incomplete**, which is what this section asks for. A
+> permanent "profile complete" card at the top of the dashboard is chrome, not information.
+> `architecture.md` is authoritative.
+
 ---
 
 ### 15 Stats Bar — Real Data
@@ -534,6 +549,17 @@ Wire three dashboard charts to real PostHog event data for current user.
 - Company Research Activity — query PostHog for company_researched events where distinctId = current userId, last 7 days, group by day
 - All three charts rendered with recharts
 - Empty state shown for each chart when no data exists yet
+
+> Corrected in feature 14, which had to build these charts.
+> **There is no recharts, and there is no charting dependency at all.** All three charts are static
+> — no tooltips, no legends, no brushing — and every recharts default (axis lines, tick styling, bar
+> radius, grid stroke) would have had to be overridden to reach the design anyway.
+> `code-standards.md` asks "is there a simpler native solution" before any dependency; here it is
+> markup, and it keeps all three on the server rather than making them Client Components. Same call
+> feature 01 made on `class-variance-authority` and feature 05 made on the shadcn CLI.
+> **Feature 17 therefore changes the data source and nothing else.** `BarChart` and `LineChart` take
+> `ChartPoint[]`; swap `lib/dashboard.ts`'s four mock functions for PostHog reads and the components
+> are untouched. The axis, the curve and the bar geometry live in `lib/charts.ts`.
 
 ---
 

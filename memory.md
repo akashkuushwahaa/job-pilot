@@ -1,200 +1,196 @@
-# Memory — Feature 12: Job Details Page (shipped, reviewed, fixed)
+# Memory — Feature 14: Dashboard Page, Full UI (built, reviewed, fixed)
 
-Last updated: 2026-08-02
+Last updated: 2026-08-03
 
-Phase 4 is half done. Features 01–12 are complete and **merged to `main`**. Next is feature 13,
-Company Research Agent — which wires the Research Company button feature 12 shipped inert **and**
-backfills the job description (see the Feature 13 note in `build-plan.md`; it is not optional).
+Phase 5 has started. Features 01–14 are complete. Feature 14 was built, reviewed with `/review`, and
+all six findings were fixed in the same session.
 
-Feature 12 has now had a `/review` pass and a partial browser pass. Nine findings were fixed, plus a
-tenth raised from the browser. See "Review fixes" below — several are rules, not one-off patches.
+Two things carry forward and neither is about feature 14:
+
+- **Feature 13's research agent has still never run.** No Browserbase session has ever been created
+  from this codebase. `feat/13-company-research` is still unmerged.
+- **Feature 14 has never been seen signed in.** Both browser passes ran against a temporary
+  unauthenticated preview route, so `requireUser()`, `AppNavbar` in place and the completion banner
+  on the real `/dashboard` are unexercised.
 
 ## What was built
 
-`/find-jobs/[id]` — the whole job rendered from its `jobs` row. Zero Client Components; everything is
-static or a `Link`.
+`/dashboard` — four stat cards, a Recent Activity timeline and three charts, on mock data. This
+deleted the last `ComingSoon` usage, and the component with it.
 
-- **`app/find-jobs/[id]/page.tsx`** — new. `max-w-4xl` reading column (following `/profile`, not the
-  1440px container `/find-jobs` uses), a Back to Jobs link, then a `space-y-6` stack of five cards.
-- **`components/job-details/`** — new folder, five components matching `architecture.md` name for
-  name: `JobInfo` (header card + the four fact cards, as one fragment), `MatchScore` (AI reasoning
-  card + skills card), `JobDescription`, `CompanyResearch`, `JobActions`.
-- **`lib/jobs.ts`** — gained `JOB_DETAIL_COLUMNS`, a module-private `JobDetailSchema` and the
-  exported `fetchJob`.
-- **`lib/utils.ts`** — gained `matchBadge` and `formatJobType`.
-- **`types/index.ts`** — gained `JobDetail`.
-- **`components/find-jobs/JobsTable.tsx`** — the row `href` feature 09 left out has landed.
-- Docs updated: `progress-tracker.md`, `ui-registry.md`, `architecture.md`, `build-plan.md`
-  (feature 12 correction note).
+- **`lib/charts.ts`** — new. `chartScale` (axis ceiling + five ticks), `plotPercent` (bar heights),
+  `smoothLinePath` (Catmull-Rom → cubic Béziers), `hasPlottableData` (the empty-state decision).
+- **`lib/dashboard.ts`** — new. Five mock functions, one per surface, so features 15/16/17 each
+  replace exactly one and touch no component.
+- **`components/dashboard/`** — new: `StatsBar`, `StatCard`, `RecentActivity`, `ChartCard`,
+  `BarChart`, `LineChart`.
+- **`types/index.ts`** — added `DashboardStat`, `ActivityEntry`, `ActivityKind`, `ChartPoint`.
+- **`lib/profile.ts`** — gained `fetchProfile()`; `/profile` and `/dashboard` both use it now.
+- **`components/layout/ComingSoon.tsx`** — deleted, no callers left.
+- Docs updated: `progress-tracker.md`, `ui-registry.md`, `architecture.md`, `build-plan.md`,
+  `ui-tokens.md`.
 
 ## Decisions made
 
-- **The match badge is not the match bar, and the two must stay separate functions.** `matchBadge()`
-  keys on `MATCH_THRESHOLD` (70) per `ui-tokens.md`'s Status Badges table; `matchScoreFill()` keys on
-  the design's 90/80 bands. That is why the design draws an 85% badge *green* while an 85 bar is
-  *blue*. They answer different questions — "did it clear the bar" vs "where in the range does it
-  sit". **Do not collapse them.**
-- **Missing skills are purple, not red.** `build-plan.md` said "red/orange badges"; `ui-tokens.md`
-  and the design both say `bg-accent-muted` / `text-accent`. Two sources beat one, and a gap skill is
-  what feature 13 turns into a strategy, not an error. The plan was corrected.
-- **`company_research` is not selected by the read at all.** Feature 12 draws the empty state only.
-  Feature 13 must add the column to the select, the dossier markup and the button handler *together*
-  — otherwise there is a window where the card reports "No research yet" over a dossier that exists.
-- **The Research Company button is inert.** Same full-UI-then-wire split features 09 and 10 made on
-  Find Jobs. The design draws it active and the empty-state copy tells the user to click it, so it is
-  not disabled; it is documented instead.
-- **Every section renders only if it has content, and whole cards can return `null`.** No
-  `match_reason` → no reasoning card. Both skill arrays empty → no skills card. Nothing in any
-  description column → no Job Description card. Feature 10 warned this page would be thinner than the
-  design; the honest way to be thinner is to render less, not to render empty headings.
-- **A malformed id is a 404, not an error page.** `fetchJob` shape-checks the uuid before querying.
-  A missing row returns null → `notFound()`; a read failure or an unparseable row throws.
-- **The row link is one link, not five.** A `<tr>` cannot wrap an `<a>`, so the company name is the
-  link with `before:absolute before:inset-0` stretching it over a `relative` row. Accessible name is
-  "Company — Title" via an `sr-only` span. The focus ring moved onto the pseudo-element, because
-  `focus-within:bg-surface-secondary` is a 1.04:1 change and is not a focus indicator.
-- **An absent fact is `—` plus an `sr-only` "Not stated".** An em dash alone is announced as
-  "em dash", and with `job_type` null on every row this is the common case, not the edge one.
-- No new PostHog event. Still seven.
+- **No charting library — recharts was not installed.** `build-plan.md` feature 17 names it. The
+  three charts are static (no tooltips, legends or brushing), every recharts default would need
+  overriding to reach the design, and it would make all three Client Components. Built as markup plus
+  one `<svg>` instead. **Confirmed with the developer before building, because feature 17 inherits
+  it.** Same call as feature 01 on cva and feature 05 on the shadcn CLI.
+- **Feature 17 changes the data source and nothing else.** `BarChart` / `LineChart` take
+  `ChartPoint[]`; swap the mock functions for PostHog reads.
+- **Chart geometry lives in `lib/charts.ts`, not in components** — an axis ceiling or a Bézier
+  control point can be wrong in ways a screenshot does not reveal, so it has to be runnable.
+- **Whole-number data only gets whole-number ticks.** Every series here counts things.
+- **`preserveAspectRatio="none"` + `vector-effect="non-scaling-stroke"`** is what makes a hand-rolled
+  line chart responsive without JavaScript. The second attribute is not optional.
+- **Zero Client Components**, like feature 12's job details page.
+- **Two of build-plan 14's five surfaces were from the cut feature set** — the fourth stat card is
+  Jobs This Week not Cover Letters Generated, and the third chart is Company Research Activity not
+  Resume Tailoring Activity. Design + feature 15 + feature 17 against one stale line each.
+- **`AnalyticsCharts.tsx` was not built** — the design does not group the three charts, so it would
+  have had to render two non-adjacent parts of the page.
+- **The completion banner renders only when the profile is incomplete.**
 
 ## Problems solved
 
-- **PostgREST answers a malformed uuid with `22P02 invalid input syntax for type uuid`**, which
-  arrives as a *read failure* — so a hand-typed `/find-jobs/nope` would have rendered the error
-  boundary instead of a 404. Reproduced accidentally by passing a non-uuid `user_id` during
-  verification. The id guard in `fetchJob` is what prevents it.
-- **Tailwind escapes colons in the emitted selector.** A grep for `before:content-['']` and
-  `focus-visible:before:ring-accent` reported them missing from the CSS; the real selectors are
-  `.before\:content-\[\'\'\]` and `focus-visible\:before\:ring-accent`, and all ten new classes were
-  present. **Check the escaping before concluding Tailwind dropped a class.**
-- **JSX collapses a newline into a space.** `{company}` on one line and `&apos;s` on the next
-  rendered "Marlabs LLC 's". Caught by reading the markup back, not by review.
-
-## Current state
-
-- `npx tsc --noEmit`, `npm run lint` and `npm run build` all clean. Every route `ƒ`,
-  `/find-jobs/[id]` registered. Both temporary verification routes deleted and confirmed 404.
-- **Verified by execution:** the parse path over seven shapes against a row copied verbatim from the
-  live table (null arrays → `[]`, undefined text → `null`, extra keys stripped, missing title /
-  string score / bare string all rejected); the id guard with a discriminating negative control —
-  `nope`, `1' OR '1'='1`, `" "` and a truncated uuid all returned 404 **without touching the
-  database**, while two well-formed uuids reached PostgREST and came back `42501 permission denied`;
-  `matchBadge` at 69/70/85; `formatJobType` over all six inputs; the rendered markup over three job
-  shapes including a bare row that correctly dropped four elements; one `<a>` per table row with the
-  right href; and all ten new selectors present in the emitted CSS.
-- **The page has now rendered for a signed-in user, once.** Clicking a row through works — that pass
-  is what surfaced the truncated-description complaint. **Still unexercised:** the back link, View
-  Job Post and Apply Now actually opening Adzuna, the not-found page for a valid-but-absent uuid, the
-  loading skeleton, responsive stacking, and the keyboard focus ring on a row.
-- **The page cannot look like its design, and that is the data, not the page.** Live table: top
-  `match_score` is **65**, so every job renders the grey Low Match badge and the green one is
-  unreachable; `job_type` is null on all 20 rows, so Job Type always reads `—`; every salary is a
-  single figure because `salary_min == salary_max`; and the four description arrays are empty by
-  feature 10's design, so Job Description is one paragraph. **Do not "fix" the page to match the
-  picture.**
-- Database unchanged this session: 1 profile, 2 `agent_runs`, 20 jobs, one user.
-- **Git: features 10, 11 and 12 are all merged to `main`** (`f79e529 Merge feature 12: job details
-  page UI`). The review fixes live on `fix/12-review-findings`, branched off that merge and pushed.
+- **`ui-tokens.md`'s Activity Dots and Dashboard Chart Colors tables were both stale**, naming resume
+  tailoring and cover letters, and the chart table listed raw hex for colours that all had exact
+  tokens. Both rewritten in tokens.
+- **The design's activity dots encode nothing** — purple on rows 1 and 4, blue on 2, green on 3 and
+  5, across two entry types, with purple being the out-of-scope tailoring colour. Built to
+  `build-plan.md` feature 16's two-colour rule instead.
+- **A `cat >> file << 'EOF'` heredoc got mangled by the shell, twice.** Same class of failure as
+  feature 13's PowerShell here-string in `git commit -m`. **Write multi-line content with a file
+  tool, then append it** — do not pass prose through a shell heredoc. Also: Git Bash's `/tmp` is not
+  visible to a Windows `python`, so anything crossing between them needs an absolute Windows path.
 
 ## Review fixes — the ones that are rules, not patches
 
-- **`notFound()` needs a `not-found.tsx` with `AppNavbar`.** Without one Next serves a bare 404 with
-  no navigation, which is the dead-end `architecture.md` made an invariant. `not-found.tsx` takes no
-  props, so it reads the session itself via the cached `getSessionUser()`.
-- **Any row link into a protected dynamic route gets `prefetch={false}`.** Twenty rows defaulted to
-  twenty `requireUser()` calls and twenty job reads fired by scrolling. `loading.tsx` is what keeps
-  the click immediate instead — and it costs the route its hard 404 (streamed headers ⇒ 200 +
-  `robots: noindex`), which is free behind auth.
-- **A fill colour is not the colour that goes on top of it.** Third time this project has hit it:
-  `text-success` on its own tint was 2.4:1 → `text-success-foreground`; gap chips were 4.2:1 →
-  `text-accent-dark`. `DossierPreview` still has the old pairing — noted in `ui-tokens.md`.
-- **Third-party URLs are scheme-checked before they become `href`s.** `safeExternalUrl()` gates both
-  job URLs inside `JobDetailSchema`, so `JobDetail` only ever carries http/https.
-- **Text the app displays but did not author, and cannot show in full, says who cut it and where the
-  rest is.** Silence reads as a bug — it was reported as one.
-- **Never run `next build` while `next dev` owns the same `.next`.** It rewrites `.next/server`,
-  `.next/static` and `BUILD_ID` under the live server, and the dev worker dies with `Jest worker
-  encountered N child process exceptions` — **no application error is logged**, so it looks like a
-  bug in whichever route was requested. That cost real time this session. Also: the dev log prints
-  12-hour time with no AM/PM, so a `02:13` entry is 14:13.
+- **One non-finite value silently destroyed an entire chart.** `NaN` / `Infinity` propagated straight
+  through: the ceiling went `NaN`, all five ticks rendered the literal "NaN", a bar's height became
+  the invalid CSS `"NaN%"`, and the line's `d` attribute stopped parsing so the curve vanished.
+  Nothing threw, nothing logged. These functions are the boundary feature 17 feeds from PostHog. Now
+  coerced to zero with one log per series. **Found by probing the functions, not by reading them.**
+  New `architecture.md` invariant.
+- **A negative trend rendered green.** `StatCard` hardcoded the success colours while the sign logic
+  beside it already anticipated negatives — the code handled the sign in one place and not the other.
+  Three tones now. The red pair is `bg-error/10` + `text-error-dark`, because `--color-error` on its
+  own tint is 3.3:1. **Fourth time on this project: a fill colour is not the colour that goes on top
+  of it.**
+- **An axis with no marks under it reads as a chart that failed to draw.** `ChartCard` takes
+  `emptyMessage` and replaces the whole frame. `build-plan.md` assigns chart empty states to feature
+  17, but `ui-rules.md`'s rule is project-wide and an all-zero series is reachable immediately.
+- **A hardcoded tick array beside a derived ceiling.** The all-zero branch returned
+  `ticks: [0,1,2,3,4]` next to `ceiling: TICK_COUNT` — the two agreed only by coincidence of step 1.
+  Both derive from one step now.
+- **The profile read was duplicated verbatim** across `/dashboard` and `/profile`. Extracted to
+  `fetchProfile()`. `architecture.md` scopes `app/` to pages, not data access.
+- **A const array nothing validates against is a list with no reader.** `ACTIVITY_KINDS` became a
+  plain union; `JOB_MATCH_FILTERS` stays an array because the URL parser checks an untrusted string
+  against it.
+
+## Current state
+
+- `npx tsc --noEmit`, `npm run lint`, `npm run build` all clean. Every route still `ƒ`.
+- **Verified by execution:** 45 checks on the original chart maths, then 32 more after the fixes. The
+  three design series produce byte-identical axes before and after the hardening. Across fourteen
+  maxima from 1 to 4321 the ceiling is never below the max, there are always five ticks, the last
+  tick is always the ceiling and every tick is whole. Non-finite input now yields a finite axis, a 0%
+  bar and a null path rather than poisoning the render.
+- **Verified in a browser, twice.** First pass at 1470/834/414px: layout matches the design, the
+  stats bar goes 4 → 2 → 1, the curve and its stroke weight survive the width change. One real defect
+  found there — the score buckets wrapped at their hyphen, fixed with `whitespace-nowrap`. Second
+  pass after the review fixes: all four trend states side by side, both chart empty states, and the
+  populated dashboard re-rendered to confirm the `ChartCard` restructure broke nothing. Console clean
+  both times.
+- `/dashboard` still 307s to `/login` signed out. Both temporary preview routes deleted, 404
+  confirmed.
+- **Git:** feature 14 is **uncommitted** — this is the next action. `feat/13-company-research` is
+  still unmerged. Database untouched this session: still 1 profile, 2 `agent_runs`, 20 jobs.
 
 ## Next session starts with
 
-1. **Merge `fix/12-review-findings` into `main`.** It is pushed but not merged.
-2. **Finish the browser pass for features 11 and 12.** For 11: type in the filter (watch the 300ms
-   debounce and that the caret never jumps), switch both selects, confirm the back button does not
-   un-type, hit `?page=99` and confirm it clamps, and check High Match shows the *filtered* empty
-   sentence. For 12: Back to Jobs, both external links, a valid-but-absent uuid for the not-found
-   page, and the loading skeleton. **Pagination still cannot be exercised** — 20 rows at 20 per page
-   is one page, so a 21st row or a lowered `JOBS_PAGE_SIZE` is needed.
-3. **Fix the country defect** — add `in` and the other Adzuna markets to `ADZUNA_COUNTRIES` in
-   `lib/adzuna.ts`, **and** surface the market actually searched in the result banner (`agent_logs`
-   already records it: "Adzuna returned 10 **us** listings"). Delete the ten Indianapolis rows after.
-4. **Run the same search twice** — still never done. Two runs have happened but they were different
-   searches, so the dedupe path has never executed. Row count must not change, `found_at` must not
-   move, `run_id` must move to the new run, a hand-set `company_research` must survive.
-5. **Feature 13 — Company Research Agent.** It must add `company_research` to the select, the
-   nine-field dossier markup and the button handler together, and it needs a `"use client"` boundary
-   in `CompanyResearch` for the first time.
+1. **Commit feature 14**, then decide the branch. It was built on `feat/13-company-research`, so
+   feature 13's two commits and feature 14's changes are stacked on one branch — split them, or merge
+   13 first. Repo convention: one feature branch per build-plan feature, `feat/NN-slug` off main.
+2. **Run the research agent once, for real** — still the single biggest gap in the project. Pick a
+   job whose `source_url` reaches a server-rendered posting, click Research Company, and watch the
+   redirect, the backfill, the browse, the nine sections and the `company_researched` event. Then
+   re-click to confirm the add-only guard.
+3. **Open `/dashboard` signed in** — the one thing feature 14 could not verify.
+4. **Fix the country defect** — add `in` and the other Adzuna markets to `ADZUNA_COUNTRIES` and
+   surface the market actually searched. Delete the ten Indianapolis rows after.
+5. **Run the same search twice** — the dedupe path has still never executed.
+6. **Feature 15 — Stats Bar, real data.** Replace `mockStats()` with four counts against the user's
+   own rows. Nothing else changes.
 
 ## Open questions
 
+**Feature 14:**
+
+- **`/dashboard` has never been opened signed in.** See above.
+- **Feature 15 must decide what "vs last week" means when there is no previous week.** A first-week
+  user has nothing to compare against; `DashboardStat.trend` is nullable for exactly this, but the
+  rule is not written down.
+- **Feature 16 needs `agent_runs` and researched jobs merged**, and research runs still open no
+  `agent_runs` row — see below. That decision is now due.
+- The `pl-10` axis gutter fits ticks up to four characters. Real counts in the thousands would sit
+  2px into the card padding — visible but not broken.
+
+**Feature 13, still open:**
+
+- **Nothing has run.** The biggest gap in the project.
+- **Research runs open no `agent_runs` row**, so features 15 and 16 will not see them. Decide before
+  feature 16: widen `agent_runs`, or have those features read `agent_logs` too.
+- **No rate limiting on `/api/agent/research`.** Each call costs a Browserbase session and two GPT-4o
+  calls. Same exposure `/api/agent/find` has.
+- **Two research runs at once will degrade one of them** — the free plan allows a single session.
+- The `NOT_THE_EMPLOYER` list is hand-maintained and certainly incomplete.
+
 **Feature 12:**
 
-- Nothing has run in a browser.
-- **The design's header badge is unreachable with current data** (top score 65). Confirm the green
-  variant renders once a job scores 70+.
-- The Back to Jobs link points at bare `/find-jobs` and drops the list's filter. The browser back
-  button preserves it. Judged acceptable; revisit if it reads as a bug in the browser pass.
+- **The design's green header badge is unreachable with current data** (top score 65).
+- The Back to Jobs link drops the list's filter; the browser back button preserves it. Accepted.
 
 **Feature 11:**
 
-- Nothing has run in a browser. Pagination cannot be tested until a 21st row exists.
-- Should a new search reset the filters? Today it does not: with `match=high` active, a search can
-  report "Found 10 jobs" above a table saying "No jobs match these filters". Judged honest and left
-  alone, but it will look like a bug the first time someone hits it.
+- **Pagination cannot be tested until a 21st row exists** — 20 rows at 20 per page is one page.
+- Should a new search reset the filters? Today it does not.
 
 **Feature 10, still open:**
 
-- **The country defect is unfixed** — an unsupported country returns confidently wrong results
-  (India → Indianapolis). Oldest open item.
+- **The country defect is unfixed** — India → Indianapolis. Oldest open item.
 - **The dedupe path has never executed.**
-- **The completeness gate, the error banner, the zero-result sentence and Enter-to-submit** are all
-  unexercised, as is the skip-and-log path for a failed score (no score has ever failed).
-- **`job_found` has never been confirmed arriving** — server-side through `posthog-node`, needs
-  PostHog's Activity view.
+- The completeness gate, the error banner, the zero-result sentence and Enter-to-submit are all
+  unexercised, as is the skip-and-log path for a failed score.
+- **`job_found` has never been confirmed arriving** — server-side, needs PostHog's Activity view.
 - `gb` and `us` have run. `au` and `ca` have not; `in` is unsupported.
 
 **Carried forward, still open:**
 
-- **Features 07 and 08 have never been clicked in a browser.** Extract, Generate, the confirm step,
-  the two disabled states, `ResumePreview` after a generated resume.
+- **Features 07 and 08 have never been clicked in a browser.**
 - **The first real click of Generate destroys the uploaded resume feature 07 extracts from.**
-- **A real-world resume has never been through extraction** — only a generated single-column PDF.
+- **A real-world resume has never been through extraction.**
 - **The comma-separated → `text[]` split has never run.**
 - **`profile_completed` has not been confirmed arriving**, and it should fire exactly once.
-- **Server-side upload rejection is untested** — `curl -F` a non-PDF and a >5MB file at
-  `/api/resume` with a session cookie.
+- **Server-side upload rejection is untested** — a non-PDF and a >5MB file at `/api/resume`.
 - **Neither error boundary has ever rendered.** Zero `$exception` events.
 - **Google OAuth has not run since the feature-03 fixes** — every sign-in so far has been GitHub.
-- **Cross-user isolation is unproven for both RLS and storage.** One user exists and admin tooling
-  refuses `SET ROLE`. Storage has no ownership model, so the three `/api/resume*` routes are the
-  only enforcement.
-- **Rotate the InsForge admin API key** if it was ever committed, pushed or deployed. The
-  full-access key had been pasted into the public anon-key variable and served to browsers before
-  being replaced.
+- **Cross-user isolation is unproven for both RLS and storage.** One user exists.
+- **Rotate the InsForge admin API key** if it was ever committed, pushed or deployed. (`.mcp.json` is
+  gitignored and the key was not in git history as of feature 13.)
 - **Input masking has not been confirmed in an actual recording.**
-- **Responsive behaviour has never been looked at on `/find-jobs` or `/find-jobs/[id]`** — horizontal
-  scroll under 720px, the stacking of the search row, filter bar, job header row and fact grid, row
-  hover, select focus rings, and how the table reads on a phone.
+- **Responsive behaviour has never been looked at on `/find-jobs` or `/find-jobs/[id]`**, or on the
+  dossier card. `/dashboard` is now the only page that has had a real responsive pass.
 
 **Small, worth doing when convenient:**
 
-- `Button` size `md` is `h-9` while form controls are `h-10`, so buttons on a field row carry an
-  explicit `h-10`. Two of them.
+- `Button` size `md` is `h-9` while form controls are `h-10`, so two buttons carry an explicit
+  `h-10`.
 - `tailwindcss@^4` is installed despite `AGENTS.md` saying to lock 3.4. Deliberate (feature 02), but
   the instruction and the lockfile still disagree.
 - The ten Indianapolis rows are still in `jobs`, now joined by ten Virginia ones. Both will skew
-  feature 15's stats.
+  feature 15's stats — which is now the next feature.
 - ESLint suggests `max-w-[1440px]` → `max-w-360` and `min-w-[720px]` → `min-w-180`. Warnings only,
-  and the arbitrary values match `ui-registry.md`'s documented page container.
+  and `/dashboard` adds one more instance.

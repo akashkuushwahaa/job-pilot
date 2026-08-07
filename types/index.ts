@@ -122,15 +122,41 @@ export type JobListItem = {
   found_at: string;
 };
 
+// jobs.company_research — the dossier the research agent writes, and the only
+// jsonb column the app renders. Postgres does not check jsonb structurally, so
+// nothing may read this shape without parsing it first: a drifted field arrives
+// as `undefined` and throws at the render, not at the read. See lib/dossier.ts.
+//
+// Every field can be empty. A dossier is always written whole, but a run whose
+// browser phase found nothing produces one with thin arrays, and the card
+// renders only the sections that have content — the same rule JobDescription
+// follows.
+export type CompanyDossier = {
+  companyOverview: string;
+  techStack: string[];
+  culture: string[];
+  whyThisRole: string;
+  yourEdge: string[];
+  gapsToAddress: string[];
+  smartQuestions: string[];
+  interviewPrep: string[];
+  sources: string[];
+};
+
 // One whole job, as the details page renders it. Wider than JobListItem and
-// deliberately not a superset of the `jobs` table: `company_research` is absent
-// because feature 12 only draws the empty state, and `run_id` / `source` /
+// deliberately not a superset of the `jobs` table: `run_id` / `source` /
 // `external_id` are bookkeeping the page never shows.
 //
-// The five description fields are empty on every row discovered so far — Adzuna
-// returns a 500-character snippet, so feature 10 puts it in `about_role` verbatim
-// and writes nothing else. Rendering must therefore be per-section, never
-// assumed.
+// `company_research` is null until the research agent has run for this job.
+// Feature 13 added it to the read, the dossier markup and the button's handler
+// in one change, so there is never a card reporting "No research yet" over a
+// dossier that exists.
+//
+// The five description fields are empty on every row Adzuna discovered — it
+// returns a 500-character snippet, so feature 10 puts it in `about_role`
+// verbatim and writes nothing else. Feature 13's backfill fills them from the
+// real posting when it can reach one, so rendering stays per-section: present on
+// a backfilled row, absent on every row the backfill could not read.
 export type JobDetail = {
   id: string;
   title: string;
@@ -150,6 +176,7 @@ export type JobDetail = {
   match_reason: string | null;
   matched_skills: string[];
   missing_skills: string[];
+  company_research: CompanyDossier | null;
   found_at: string;
 };
 
@@ -196,3 +223,45 @@ export type ExtractedFormValues = Partial<
   education?: Partial<EducationEntry>;
 };
 
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+// The four stat cards. `trend` is the "+12% vs last week" badge and is null on
+// the two cards the design gives a plain subtitle instead — a card that has no
+// week-on-week comparison says what the number is rather than inventing a
+// change. `value` is pre-formatted because "82%" and "284" are different shapes.
+export type DashboardStat = {
+  label: string;
+  value: string;
+  trend: number | null;
+  caption: string;
+};
+
+// Recent Activity. Feature 16 merges agent_runs and researched jobs into this
+// shape; feature 14 renders it from a mock list. The kind drives the dot colour
+// and nothing else — build-plan.md feature 16 fixes the two entry types.
+//
+// A plain union rather than a const array, unlike JOB_MATCH_FILTERS and
+// JOB_SORTS. Those exist as arrays because the URL parser validates an untrusted
+// string against them at runtime; this value is only ever constructed by the
+// code that builds the entry, so an array here would be a list with no reader.
+export type ActivityKind = "search" | "research";
+
+export type ActivityEntry = {
+  id: string;
+  kind: ActivityKind;
+  message: string;
+  // ISO timestamp, not a rendered string. formatRelativeTime() turns it into
+  // "10 minutes ago" at render, so feature 16 changes the data source and
+  // nothing else — the same split feature 09 made on the Date Found column.
+  at: string;
+};
+
+// One plotted value. Every dashboard chart is a labelled series over a small
+// number of buckets — days of the week, or score ranges.
+export type ChartPoint = {
+  label: string;
+  value: number;
+};

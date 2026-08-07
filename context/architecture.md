@@ -62,7 +62,10 @@
 │       │   └── extract/route.ts           → Extract profile data from uploaded resume PDF
 ├── agent/
 │   ├── adzuna.ts                          → Discovery run: search, score, upsert, close the run
-│   ├── research.ts                        → Company research — Browserbase + Stagehand + GPT-4o
+│   ├── research.ts                        → Research run: resolve, backfill, browse, synthesise, save
+│   ├── posting.ts                         → Follows the Adzuna redirect; homepage URL + description backfill
+│   ├── browsing.ts                        → The Stagehand phase — homepage + up to 3 sub-pages
+│   ├── synthesis.ts                       → GPT-4o dossier from research + job + profile
 │   ├── matcher.ts                         → GPT-4o scoring of one job against one profile
 │   ├── logs.ts                            → The only writer of agent_logs; never throws
 │   └── types.ts                           → Agent-specific TypeScript types
@@ -81,16 +84,17 @@
 │   │   ├── Navbar.tsx                       → Homepage chrome — nav + CTA
 │   │   ├── AppNavbar.tsx                    → Authenticated chrome — nav with active item
 │   │   ├── Footer.tsx
-│   │   ├── ErrorState.tsx                  → Shared card for both error boundaries
-│   │   └── ComingSoon.tsx                  → Placeholder card for unbuilt protected routes
+│   │   └── ErrorState.tsx                  → Shared card for both error boundaries
 │   ├── homepage/
 │   │   ├── Hero.tsx
 │   │   ├── HowItWorks.tsx
 │   │   └── Features.tsx
 │   ├── dashboard/
-│   │   ├── StatsBar.tsx
+│   │   ├── StatsBar.tsx                     → The four-card row
+│   │   ├── StatCard.tsx                     → One stat card
 │   │   ├── RecentActivity.tsx
-│   │   └── AnalyticsCharts.tsx
+│   │   ├── ChartCard.tsx                    → Card, title, dashed grid, both axes
+│   │   └── BarChart.tsx / LineChart.tsx     → The marks only; no chart library
 │   ├── profile/
 │   │   ├── ProfileWorkspace.tsx             → Owns form state; the node both cards write to
 │   │   ├── ProfileForm.tsx                  → All five form sections; controlled by the workspace
@@ -108,15 +112,18 @@
 │       ├── JobInfo.tsx
 │       ├── MatchScore.tsx
 │       ├── JobDescription.tsx
-│       ├── CompanyResearch.tsx
+│       ├── CompanyResearch.tsx              → The dossier card; server-rendered, nine sections
+│       ├── ResearchButton.tsx               → "use client" — the only client boundary on this page
 │       └── JobActions.tsx
 ├── proxy.ts                                → Session refresh + optimistic route protection
 ├── lib/
 │   ├── insforge-client.ts                 → InsForge browser client instance
 │   ├── insforge-server.ts                 → InsForge server client
 │   ├── auth.ts                            → getSessionUser / requireUser, OAuth constants
-│   ├── browserbase.ts                     → Browserbase session creation + management
-│   ├── stagehand.ts                       → Stagehand initialisation with Browserbase session
+│   ├── browserbase.ts                     → Browserbase session creation; null rather than throw
+│   ├── stagehand.ts                       → Stagehand init + close, against an existing session
+│   ├── dossier.ts                         → The jsonb dossier schema — parsed on write AND on read
+│   ├── safe-fetch.ts                      → Server-side fetch of URLs the app did not author
 │   ├── adzuna.ts                          → Adzuna API client
 │   ├── posthog-server.ts                  → captureServerEvent — server-side PostHog capture
 │   ├── openai.ts                          → OpenAI client instance + the pinned model string
@@ -125,8 +132,10 @@
 │   ├── resume-pdf.tsx                     → The react-pdf Document + renderResumePdf()
 │   ├── fonts.ts                           → next/font instance, shared with global-error.tsx
 │   ├── completeness.ts                    → completeness(profile) — the only definition of "complete"
-│   ├── profile.ts                         → parseProfile + both directions of the row <-> form mapping
+│   ├── profile.ts                         → fetchProfile, parseProfile + both directions of the row <-> form mapping
 │   ├── jobs.ts                            → parseJobList, the discovery banner sentence, the filtered/sorted/paged list read, and the single-job read
+│   ├── charts.ts                          → Axis ceilings, bar heights, the smoothed line path
+│   ├── dashboard.ts                       → The dashboard's data — mock until features 15-17
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -188,16 +197,34 @@ API route in app/api/agent/research
         ↓
 Calls agent/research.ts
         ↓
+fetch(source_url, { redirect: "follow" }) → the employer's real job page
+        ↓
+        ├── that page's HTML → GPT-4o → about_role + the four bullet columns
+        │   (the description backfill — best effort, never fails the run)
+        └── that page's domain → the company homepage URL
+        ↓
 Single Browserbase session opens with Stagehand
         ↓
-Navigates to company homepage + sub pages
+Navigates to company homepage + up to 3 sub pages
         ↓
-GPT-4o synthesizes dossier from extracted content
+GPT-4o synthesizes dossier from research + job + profile
         ↓
 Dossier saved to jobs.company_research
         ↓
-Page data revalidated
+Page data revalidated by router.refresh()
 ```
+
+**Every phase before the synthesis is allowed to fail, and none of them ends the run.** No
+`source_url`, a redirect that times out, a JS-rendered posting with no readable body, a parked
+domain, Browserbase unavailable — each costs that phase and nothing else. The deliverable is a
+dossier, and GPT-4o can write one from the job and the profile alone. Only a missing dossier, or one
+that cannot be saved, is a failure the user hears about.
+
+**The backfill and the dossier share one fetch on purpose.** Feature 13 has to follow the redirect
+anyway to find out who the employer is; the posting body is on the page it lands on. Building a
+separate scraper for the description would duplicate that hop. Two rules carry over from feature 10
+and are not negotiable: write no field the page did not state, and never touch `found_at` or
+`company_research` from the discovery path.
 
 ### Resume Operations (API Routes)
 
@@ -528,10 +555,10 @@ components/auth/SignOutButton posthog.capture() then posthog.reset()
 lib/posthog-server.ts         captureServerEvent() — every server-side event
 ```
 
-Identification lives in the **root layout**, not in a page. Pages come and go — the stubs that hold
-`ComingSoon` are deleted by features 05, 09 and 14 — and identity that lives in a page disappears
-with it. `getSessionUser()` is wrapped in React `cache()` so the layout and the page share one
-InsForge round-trip per request.
+Identification lives in the **root layout**, not in a page. Pages come and go, and identity that
+lives in a page disappears with it — the three `ComingSoon` stubs that once held it were deleted by
+features 05, 09 and 14, taking the component with them. `getSessionUser()` is wrapped in React
+`cache()` so the layout and the page share one InsForge round-trip per request.
 
 Server events go through `captureServerEvent(userId, event, properties)`, which uses
 `captureImmediate`, forces `userId` onto every event, bounds the retry budget, and reports delivery
@@ -593,6 +620,12 @@ const data = await response.json();
 
 ## Company Research Pattern
 
+> **Corrected against the installed Stagehand 3.7.1 in feature 13.** The block that used to be
+> here described Stagehand 1.x — `modelName` at the top level, `modelClientOptions`, and
+> `stagehand.page`. None of the three exist. `library-docs.md` carries the full correction; the
+> shape below is what the types actually declare, and `lib/stagehand.ts` is the only place the
+> client is constructed.
+
 ```typescript
 // Single session — visits company homepage and sub pages sequentially
 const stagehand = new Stagehand({
@@ -600,35 +633,47 @@ const stagehand = new Stagehand({
   apiKey: process.env.BROWSERBASE_API_KEY!,
   projectId: process.env.BROWSERBASE_PROJECT_ID!,
   browserbaseSessionID: session.id,
-  modelName: "gpt-4o",
-  modelClientOptions: { apiKey: process.env.OPENAI_API_KEY! },
+  model: { modelName: OPENAI_MODEL, apiKey: process.env.OPENAI_API_KEY! },
+  disablePino: true,
+  verbose: 0,
 });
 
 await stagehand.init();
-const page = stagehand.page;
 
-// Clean company name and construct homepage URL
-const cleanName = companyName
-  .replace(/\s*(Inc\.?|LLC|Ltd\.?|Corp\.?|Co\.?).*$/i, "")
-  .trim()
-  .toLowerCase()
-  .replace(/\s+/g, "");
+// Not stagehand.page. Returns Page | undefined — the undefined branch is real.
+const page = stagehand.context.activePage();
 
-const homepageUrl = `https://www.${cleanName}.com`;
-
-// Navigate and extract — graceful fallback if page not found
+// Navigate and extract — graceful fallback if the page is not found.
+// domcontentloaded, not networkidle: a marketing homepage with a chat widget
+// or a beacon on a timer may never go idle, and the copy is in the document
+// long before that.
 try {
-  await page.goto(homepageUrl);
-  await page.waitForLoadState("networkidle");
-  const content = await stagehand.extract({ instruction: "..." });
+  await page.goto(homepageUrl, {
+    waitUntil: "domcontentloaded",
+    timeoutMs: 20_000,
+  });
+
+  const content = await stagehand.extract(instruction, schema, {
+    timeout: 45_000,
+  });
 } catch (error) {
-  // Log and continue — GPT-4o will synthesize from what was found
-  await logAgentError(jobId, error);
+  // Log and continue — GPT-4o synthesises from whatever was gathered
+  await logAgentError(insforge, { runId: null, userId, jobId, message });
 }
 
-// Always close session when done
+// Always close the session, always in a finally. An unclosed session holds the
+// free plan's single slot for its full 120 seconds, and the next research click
+// finds the browser unavailable for a reason nothing in the logs explains.
 await stagehand.close();
 ```
+
+**The homepage URL is derived from the redirect, not from the company name.** The name-based guess
+(`https://www.{cleanName}.com`) is the *fallback*, not the primary path — feature 13 follows the
+Adzuna redirect with `fetch(redirect_url, { redirect: "follow" })` and takes the root domain of
+wherever it lands. It also refuses that domain when it belongs to an ATS or an aggregator
+(`boards.greenhouse.io`, `*.myworkdayjobs.com`, `adzuna.com`, `linkedin.com`, and the rest of
+`NOT_THE_EMPLOYER` in `agent/posting.ts`): stripping one of those to its root domain would send the
+browser off to research Greenhouse and report its culture as the employer's.
 
 ---
 
@@ -638,7 +683,15 @@ Rules the AI agent must never violate:
 
 - API routes contain no UI logic. Components contain no DB logic.
 - Every `profiles` row read goes through `parseProfile()` — never annotate an SDK result as a typed
-  row, because `any` is assignable to anything and the annotation checks nothing.
+  row, because `any` is assignable to anything and the annotation checks nothing. A page reads the
+  caller's own row through `fetchProfile()` rather than writing the query out again: `/profile` and
+  `/dashboard` both render something consequential off the answer, and both need the same
+  throw-rather-than-degrade branch.
+- **Every value that reaches a chart is checked for finiteness first.** `lib/charts.ts` coerces
+  `NaN` and `Infinity` to zero and logs, because a single non-finite value otherwise renders the
+  string "NaN" across an axis, sets a bar's height to the invalid CSS `"NaN%"`, and makes the line's
+  `d` attribute unparseable so the curve disappears — all without throwing. Feature 17 feeds these
+  functions from PostHog, which is external input. Found by `/review` on feature 14.
 - Every GPT-4o response is validated with zod before use, for the same reason. A model response is
   untrusted input, not a typed object.
 - The resume object key is always `{user.id}/resume.pdf` derived from the session. No route accepts
@@ -654,6 +707,17 @@ Rules the AI agent must never violate:
 - Job discovery writes no job facts it did not receive. Adzuna's snippet goes into `about_role`
   verbatim; `responsibilities`, `requirements`, `nice_to_have`, `benefits` and `about_company` stay
   empty rather than being reconstructed from a description that truncates mid-sentence.
+- **A URL out of the database is never fetched server-side with `fetch()` directly.** It goes
+  through `safeFetchExternal()` in `lib/safe-fetch.ts`, which resolves the hostname and refuses
+  loopback, link-local, RFC 1918, CGNAT and IPv4-mapped-IPv6 addresses, re-checking **every redirect
+  hop**. `safeExternalUrl()` answers "is this safe to link"; it checks the scheme and nothing else.
+  `jobs.source_url` is writable by any authenticated user under the `jobs_owner` policy, so a
+  crafted row would otherwise point the research agent at the cloud metadata endpoint and render the
+  response back through GPT-4o. Found by `/review` on feature 13.
+- **The research agent never replaces good data with worse.** The description backfill only writes a
+  column that is currently empty or still holds Adzuna's truncated snippet, and a dossier that
+  reached the company's website is never overwritten by one synthesised without it. A re-run can
+  only add.
 - `matched_skills` is always filtered back down to skills the profile actually lists. It is rendered
   as the candidate's own claim, so the model's answer is checked against the row rather than trusted.
 - All InsForge server-side writes use `createInsforgeServer()` — never the browser client.

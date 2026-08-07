@@ -335,20 +335,42 @@ font-weight: 500
 Each activity type has a specific dot color:
 | Activity Type | Outer ring | Inner dot |
 |---|---|---|
-| Resume tailored | `#F3E8FF` (accent-light) | `#7C5CFC` (accent) |
-| Cover letter | `#DBEAFE` (info-light) | `#61A8FF` (info) |
-| Job found | `#D0FAE5` (success-light) | `#00BC7D` (success-alt) |
+| ~~Resume tailored~~ | ~~`#F3E8FF` (accent-light)~~ | ~~`#7C5CFC` (accent)~~ |
+| Company researched | `#DBEAFE` (info-light) | `#61A8FF` (info) |
+| Jobs found | `#D0FAE5` (success-light) | `#00BC7D` (success-alt) |
 Dot size: 8px inner, 16px outer with white border
+
+> Corrected in feature 14. There are **two** activity types, not three: `agent_runs` completing and
+> `jobs.company_research` being written — the two `build-plan.md` feature 16 names, and the only two
+> events the product produces. Resume tailoring is out of scope in `project-overview.md`, so the
+> purple row has no entry that can ever use it. `context/designs/dashboard.png` does draw purple
+> dots, on three of its five rows and with no relation to the row's type; it is the stale artefact
+> here, the same way `agnet-log.png` was in feature 01. The "Cover letter" row was renamed rather
+> than struck: cover letters are also out of scope, but its **colours** are the ones the design uses
+> for "Researched Stripe", so the row survives with the live label on it.
 
 ### Dashboard Chart Colors
 
-| Chart                            | Color                                                           |
-| -------------------------------- | --------------------------------------------------------------- |
-| Jobs Found Over Time (line)      | `#7C5CFC` stroke, 3px width, gradient fill rgba(124,92,252,0.2) |
-| Resume Tailoring Activity (bars) | `#61A8FF`                                                       |
-| Match Score Distribution (bars)  | `#10B981`                                                       |
-| Chart grid lines                 | `1px dashed #E7EAF3`                                            |
-| Chart axis labels                | `#9CA3AF`, 12px                                                 |
+| Chart                             | Color                                                           |
+| --------------------------------- | --------------------------------------------------------------- |
+| Jobs Found Over Time (line)       | `bg-accent` stroke, 3px width, gradient fill accent → transparent |
+| Company Research Activity (bars)  | `bg-info`                                                       |
+| Match Score Distribution (bars)   | `bg-success`                                                    |
+| Chart grid lines                  | `border-t border-dashed border-border`                          |
+| Chart axis labels                 | `text-xs text-text-muted`                                       |
+
+> Rewritten in feature 14, which built these three charts.
+> **The chart names were stale** — the blue bars are Company Research Activity; resume tailoring is
+> out of scope. See the Activity Dots note above.
+> **The values are tokens now, not hex.** Every colour in the old table already had an exact token
+> (`#7C5CFC` = accent, `#61A8FF` = info, `#10B981` = success, `#E7EAF3` = border) and a table of raw
+> hex under a document whose first invariant is "never use hex values directly in components" is an
+> invitation to paste one. The one that was *not* exact is the axis label: `#9CA3AF` has no token,
+> and `--color-text-muted` (#99A1AF) is the nearest — a two-point difference on a muted grey,
+> against a whole new token nothing else would use.
+> **The line's fill is a gradient, not a flat 20% tint.** The design fades it to nothing at the
+> baseline; a flat `rgba(124,92,252,0.2)` draws a hard edge along the bottom of the plot that the
+> design does not have.
 
 ### Logo
 
