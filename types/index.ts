@@ -223,3 +223,45 @@ export type ExtractedFormValues = Partial<
   education?: Partial<EducationEntry>;
 };
 
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+// The four stat cards. `trend` is the "+12% vs last week" badge and is null on
+// the two cards the design gives a plain subtitle instead — a card that has no
+// week-on-week comparison says what the number is rather than inventing a
+// change. `value` is pre-formatted because "82%" and "284" are different shapes.
+export type DashboardStat = {
+  label: string;
+  value: string;
+  trend: number | null;
+  caption: string;
+};
+
+// Recent Activity. Feature 16 merges agent_runs and researched jobs into this
+// shape; feature 14 renders it from a mock list. The kind drives the dot colour
+// and nothing else — build-plan.md feature 16 fixes the two entry types.
+//
+// A plain union rather than a const array, unlike JOB_MATCH_FILTERS and
+// JOB_SORTS. Those exist as arrays because the URL parser validates an untrusted
+// string against them at runtime; this value is only ever constructed by the
+// code that builds the entry, so an array here would be a list with no reader.
+export type ActivityKind = "search" | "research";
+
+export type ActivityEntry = {
+  id: string;
+  kind: ActivityKind;
+  message: string;
+  // ISO timestamp, not a rendered string. formatRelativeTime() turns it into
+  // "10 minutes ago" at render, so feature 16 changes the data source and
+  // nothing else — the same split feature 09 made on the Date Found column.
+  at: string;
+};
+
+// One plotted value. Every dashboard chart is a labelled series over a small
+// number of buckets — days of the week, or score ranges.
+export type ChartPoint = {
+  label: string;
+  value: number;
+};

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { InsforgeServerClient } from "@/lib/insforge-server";
 import {
   EXPERIENCE_LEVELS,
   REMOTE_PREFERENCES,
@@ -19,6 +20,37 @@ import {
 // is silent, because every field is optional on the way in.
 
 export type ProfileRow = Omit<ProfileFields, "resume_path">;
+
+// The caller's own profile row, or null if they have never saved one — there is
+// no row until the first save, so every read has to handle absence.
+//
+// **A read failure throws rather than degrading to null.** The two callers both
+// render something consequential off the answer: /profile would show an empty
+// form over real saved data and let the next save blank it, and /dashboard would
+// show the needs-attention banner over a profile that is actually complete. An
+// unreadable row is not an absent one.
+//
+// Lives here rather than in each page because both were running the identical
+// query, the identical error branch and the identical parse — architecture.md
+// scopes app/ to pages, not to data access.
+export async function fetchProfile(
+  insforge: InsforgeServerClient,
+  userId: string,
+  caller: string,
+): Promise<Profile | null> {
+  const { data, error } = await insforge.database
+    .from("profiles")
+    .select("*")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(`[${caller}] profile read failed`, error);
+    throw new Error("Profile unavailable");
+  }
+
+  return parseProfile(data);
+}
 
 export const EMPTY_ROLE: WorkExperienceEntry = {
   company: "",
