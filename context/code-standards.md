@@ -271,7 +271,7 @@ All environment variables defined in `.env.local` for development. Never hardcod
 | `NEXT_PUBLIC_APP_URL`               | actions/auth.ts                                  |
 | `BROWSERBASE_API_KEY`               | lib/browserbase.ts                               |
 | `BROWSERBASE_PROJECT_ID`            | lib/browserbase.ts                               |
-| `OPENAI_API_KEY`                    | agent/ functions                                 |
+| `OPENAI_API_KEY`                    | lib/openai.ts — the only reader; agent/ imports it |
 | `ADZUNA_APP_ID`                     | lib/adzuna.ts                                    |
 | `ADZUNA_APP_KEY`                    | lib/adzuna.ts                                    |
 | `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` | instrumentation-client.ts, lib/posthog-server.ts |

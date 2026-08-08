@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type Dispatch, type SetStateAction } from "react";
 import { Plus } from "lucide-react";
 
 import { saveProfile } from "@/actions/profile";
@@ -10,13 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { EMPTY_ROLE, toFormValues } from "@/lib/profile";
+import { EMPTY_ROLE } from "@/lib/profile";
 import { cn, MAX_WORK_EXPERIENCE } from "@/lib/utils";
-import type {
-  EducationEntry,
-  Profile,
-  ProfileFormValues,
-  WorkExperienceEntry,
+import {
+  DEGREE_OPTIONS,
+  type EducationEntry,
+  type ProfileFormValues,
+  type WorkExperienceEntry,
 } from "@/types";
 
 const EXPERIENCE_LEVEL_OPTIONS = [
@@ -37,16 +37,6 @@ const REMOTE_PREFERENCE_OPTIONS = [
   { value: "remote", label: "Remote" },
   { value: "hybrid", label: "Hybrid" },
   { value: "onsite", label: "Onsite" },
-] as const;
-
-const DEGREE_OPTIONS = [
-  "High School",
-  "Associate",
-  "Bachelor's",
-  "Master's",
-  "PhD",
-  "Bootcamp",
-  "Self-taught",
 ] as const;
 
 type SectionProps = {
@@ -70,17 +60,14 @@ function Section({ title, action, children }: SectionProps) {
 type Status = { kind: "error" | "success"; message: string } | null;
 
 type Props = {
-  profile: Profile | null;
-  email: string;
+  values: ProfileFormValues;
+  setValues: Dispatch<SetStateAction<ProfileFormValues>>;
 };
 
-export function ProfileForm({ profile, email }: Props) {
-  const [values, setValues] = useState<ProfileFormValues>(() => ({
-    ...toFormValues(profile),
-    // Shown disabled and always written from the session — the row's own email
-    // column is only a copy, and on a first save there is no row to copy from.
-    email,
-  }));
+// Controlled by ProfileWorkspace. The values live a level up because the Extract
+// button in the Resume card writes to them too — but everything that interprets
+// them, including adopting what a save normalised, still belongs here.
+export function ProfileForm({ values, setValues }: Props) {
   const [status, setStatus] = useState<Status>(null);
   const [isSaving, startSaving] = useTransition();
 
