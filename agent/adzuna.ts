@@ -19,6 +19,10 @@ type Scored = { job: AdzunaJob; score: JobScore };
 //                      discovered", which is what the Date Found column says.
 //   company_research — a dossier costs the user a Browserbase session; a later
 //                      re-discovery must never overwrite it.
+//   researched_at    — travels with company_research for the same reason. It is
+//                      what the dashboard's activity feed sorts on, and a
+//                      re-discovery resetting it would move a research entry to
+//                      the moment the job was re-found.
 //   the four description arrays and about_company — Adzuna returns a 500
 //                      character snippet that cuts off mid-sentence, and
 //                      structuring it into "Requirements" would mean inventing
