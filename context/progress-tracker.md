@@ -7,20 +7,19 @@ Update this file after every completed feature. Any AI agent reading this should
 ## Current Status
 
 **Phase:** Phase 5 — Dashboard, in progress
-**Last completed:** 15 Stats Bar — Real Data. The four cards read the user's own `jobs` rows through
-`fetchDashboardStats()`; no component changed, because feature 14 built them against
-`DashboardStat[]`. Live account renders 30 / 51% / 2 / 30 with no trend badges — every row was
-discovered on one day, so there is no previous week to compare against.
-**Corrected, 2026-08-03:** feature 13's research agent **has run**, twice, end to end — the standing
-note that it never had is wrong. `agent_logs` records both runs on 2026-08-02, each reading 4 pages
-(`votoconsulting.com` 16:36-16:37, `oracle.com` 16:53-16:54) and saving a complete nine-field
-dossier. Both rows carry 4 `sources`, so the browser phase genuinely reached the employer's site.
+**Last completed:** 16 Recent Activity — Real Data. The feed merges completed `agent_runs` with
+researched `jobs`; `RecentActivity` did not change. This needed a schema change first — a `jobs` row
+had no timestamp for its dossier, and `found_at` is seven to nine hours earlier than the research
+actually ran, so migration `20260803090000_jobs-researched-at.sql` adds `jobs.researched_at`.
+**Also done this session:** 15 Stats Bar — Real Data. Four cards read the user's own rows; the live
+account renders 30 / 51% / 2 / 30 with no trend badges, because every row was discovered on one day.
 **Open defect, carried:** searching a country the app does not support returns confidently wrong
-results rather than nothing — "India" was scored as Indianapolis. Details in Notes. Oldest open item;
-a third search has since taken the table to 30 rows.
-**Next:** 16 Recent Activity — Real Data. It merges `agent_runs` and researched `jobs` into
-`ActivityEntry[]` and replaces `mockActivity()`. Note the shape problem feature 13 left: research
-runs write no `agent_runs` row, so the merge has to read `agent_logs` or the `jobs` rows directly.
+results rather than nothing — "India" was scored as Indianapolis. Details in Notes. Oldest open item.
+**Standing gap:** `/dashboard` has never been opened signed in. Every browser pass so far ran against
+a temporary unauthenticated preview route, so none of the six PostgREST calls features 15 and 16 add
+has executed against the live API.
+**Next:** 17 Analytics Charts — PostHog Data. It replaces the last three mock functions in
+`lib/dashboard.ts`; `BarChart` and `LineChart` already take `ChartPoint[]`.
 
 ---
 
@@ -55,7 +54,7 @@ runs write no `agent_runs` row, so the merge has to read `agent_logs` or the `jo
 
 - [x] 14 Dashboard Page — Full UI
 - [x] 15 Stats Bar — Real Data
-- [ ] 16 Recent Activity — Real Data
+- [x] 16 Recent Activity — Real Data
 - [ ] 17 Analytics Charts — PostHog Data
 
 ---
@@ -1461,3 +1460,71 @@ the question is the right one.
 **Also unverifiable with today's data:** no trend badge can render, because every row was discovered
 on the same day and there is no previous week. The three tones were confirmed in the browser during
 feature 14's review pass; what has not been seen is a badge driven by real data.
+
+### Feature 16 — Recent Activity (Real Data)
+
+`mockActivity()` deleted; `fetchRecentActivity()` merges completed `agent_runs` with researched
+`jobs`. `RecentActivity` did not change — feature 14 built it against `ActivityEntry[]`, so this is
+the second consecutive feature that swapped a data source and touched no component.
+
+**Found before writing any code, and it changed the feature:** a `jobs` row had **no timestamp for
+its dossier**. `build-plan.md` feature 16 says to "merge and sort all by created_at descending",
+which assumes one exists. The only candidate was `found_at`, and on the live rows that is **seven to
+nine hours before the research actually ran** — Oracle was found at 07:33:54 and researched at
+16:54:25. Sorting on it would have put the *oldest* research entry first and rendered "Yesterday"
+under a run that finished minutes earlier. Migration
+`20260803090000_jobs-researched-at.sql` adds `jobs.researched_at`, backfills the two existing rows
+from `agent_logs`, and adds a partial index on `(user_id, researched_at DESC)`.
+`agent/research.ts` now writes it in the same statement as the dossier.
+
+Decisions:
+
+- **The timestamp is a column, not a string match on `agent_logs`.** Deriving it from the
+  "Saved a company dossier for X" message was the alternative and was rejected twice over:
+  `agent/logs.ts` is explicitly allowed to fail silently, so a run can succeed while writing no log
+  row, and keying on prose a future edit can reword is the failure mode `JobDescription` already
+  documents.
+- **`researched_at` joins `company_research` and `found_at` in the upsert-omission list.** A
+  re-discovery that reset it would move a research entry to the moment the job was re-found.
+  Recorded in `agent/adzuna.ts` and as an `architecture.md` invariant.
+- **Only `completed` runs become entries.** This database has a failed run for "Frontend Developer";
+  rendering it as "Found 0 jobs for Frontend Developer" states something untrue, and a failure entry
+  would need a third dot colour and an error treatment neither the design nor `ui-tokens.md`
+  defines. The feed says nothing rather than something wrong.
+- **Zero is a real outcome, and it reads as "No jobs found for X".** Feature 10 saves a run that
+  found nothing; "Found 0 jobs" reads as a bug rather than as a result. Singular gets "1 job".
+- **Entry ids are namespaced** — `run-{uuid}` / `job-{uuid}` — because the two halves come from
+  different tables and nothing guarantees they cannot collide as React keys.
+- **An exact timestamp tie breaks on id.** Same rule every `jobs` ordering follows: without a unique
+  final key two events written in the same millisecond can swap places between requests.
+- **Each source is read to the display limit, not to half of it.** Five and five, merged, then
+  truncated to five — otherwise a day with five searches and no research would show three entries.
+- **A row that cannot be rendered is dropped, not faked.** A run with no usable timestamp, a research
+  row with no company or no `researched_at` — each is logged and skipped rather than rendered with an
+  invented value. A completed run missing `completed_at` falls back to `started_at`, which costs the
+  entry precision rather than its place.
+
+**Verified by execution:** 15 checks over `buildActivity` — every sentence form (plural, singular,
+zero, missing title), the interleaving of both kinds by time, namespaced ids, truncation to five,
+tie-breaking, and six ways a row can be unrenderable. Then **the real rows from the live database
+were fed through it**, and the feed came out as:
+
+```
+research  16:54:25  Researched Oracle
+research  16:37:18  Researched Voto Consulting LLC
+search    09:00:27  Found 10 jobs for Frontend Developer
+search    07:50:29  Found 10 jobs for Software Developer
+search    07:33:54  Found 10 jobs for Backend Developer
+```
+
+Exactly five entries, newest first, with the failed run absent. **Under the old `found_at` ordering
+Oracle would have been last rather than first** — which is the clearest evidence the migration was
+necessary rather than tidy.
+
+The migration was applied to the live database and read back: both dossier rows now carry a
+`researched_at` seven and nine hours after their `found_at`. `tsc`, lint and build all clean.
+
+**Not verified:** the two PostgREST calls have not run against the live API — same gap as feature 15,
+and the same fix, one signed-in visit to `/dashboard`. What is untested is whether the SDK emits
+`researched_at=not.is.null` and `status=eq.completed` as intended, not whether the questions are
+right.

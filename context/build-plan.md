@@ -551,6 +551,21 @@ Wire recent activity list to real InsForge DB data for current user.
   - company_research populated → "Researched [company] — [time ago]"
 - Color coded dot per entry type — info blue, success green
 
+> Corrected against the schema and the live data in feature 16.
+> **A `jobs` row had no timestamp for its dossier**, so "merge and sort all by created_at" could not
+> be done as written — `found_at` is when the job was *discovered*, and on this database that is
+> seven to nine hours before it was researched. Migration `20260803090000_jobs-researched-at.sql`
+> adds `jobs.researched_at`, backfills it from `agent_logs`, and `agent/research.ts` now writes it in
+> the same statement as the dossier. Sorting on `found_at` would have put the oldest research entry
+> first and rendered the wrong relative time under it.
+> **Only `completed` runs become entries.** This database has a failed run; "Found 0 jobs for
+> Frontend Developer" is a different claim from "that search failed", and a failure entry would need
+> a third dot colour that neither the design nor `ui-tokens.md` defines.
+> **Zero is a real outcome and reads as "No jobs found for X"**, not "Found 0 jobs".
+> **Entry ids are namespaced** (`run-…` / `job-…`) because the two sources are different tables, and
+> an exact timestamp tie breaks on id so the order cannot change between requests.
+> `architecture.md` is authoritative.
+
 ---
 
 ### 17 Analytics Charts — PostHog Data

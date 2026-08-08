@@ -135,7 +135,7 @@
 │   ├── profile.ts                         → fetchProfile, parseProfile + both directions of the row <-> form mapping
 │   ├── jobs.ts                            → parseJobList, the discovery banner sentence, the filtered/sorted/paged list read, and the single-job read
 │   ├── charts.ts                          → Axis ceilings, bar heights, the smoothed line path
-│   ├── dashboard.ts                       → fetchDashboardStats + the mock series features 16-17 replace
+│   ├── dashboard.ts                       → fetchDashboardStats, fetchRecentActivity + the mock chart series
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -378,6 +378,7 @@ Three columns from earlier drafts do not exist and must not be re-added:
 | matched_skills     | text[]      | Skills user has that match                     |
 | missing_skills     | text[]      | Skills user lacks                              |
 | company_research   | jsonb       | Company dossier from research agent            |
+| researched_at      | timestamptz | When that dossier was written. Null until then |
 | found_at           | timestamptz |                                                |
 
 **`about_role` is a fragment, not a summary.** This row said "2-3 sentence summary", which is what a
@@ -408,7 +409,7 @@ statement repeats the predicate, and PostgREST's `on_conflict` parameter emits n
 upsert failed with *"there is no unique or exclusion constraint matching the ON CONFLICT
 specification"*. Migration `20260802124740_jobs-dedupe-index-non-partial.sql` drops it.
 
-**The upsert must never include `company_research` or `found_at` in its payload.** PostgREST builds
+**The upsert must never include `company_research`, `researched_at` or `found_at` in its payload.** PostgREST builds
 its `ON CONFLICT DO UPDATE SET` list from the payload's own keys, so omitting a column is the only
 way to say "write this once and never touch it again". Re-discovery refreshes title, salary,
 `match_score`, `match_reason` and the skill arrays; a dossier the user spent a Browserbase session on
@@ -714,6 +715,10 @@ Rules the AI agent must never violate:
   `jobs.source_url` is writable by any authenticated user under the `jobs_owner` policy, so a
   crafted row would otherwise point the research agent at the cloud metadata endpoint and render the
   response back through GPT-4o. Found by `/review` on feature 13.
+- **`researched_at` is written in the same statement as the dossier, never separately.** It is what
+  the dashboard's activity feed sorts on, and `found_at` cannot stand in for it — on this database
+  the two are seven to nine hours apart, so a feed built on `found_at` would order research entries
+  wrongly and date them hours early. Added by feature 16.
 - **The research agent never replaces good data with worse.** The description backfill only writes a
   column that is currently empty or still holds Adzuna's truncated snippet, and a dossier that
   reached the company's website is never overwritten by one synthesised without it. A re-run can
