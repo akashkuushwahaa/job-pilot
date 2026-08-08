@@ -8,7 +8,7 @@ import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
 import {
   fetchDashboardStats,
-  mockActivity,
+  fetchRecentActivity,
   mockJobsFound,
   mockResearchActivity,
   mockScoreDistribution,
@@ -22,9 +22,10 @@ export default async function DashboardPage() {
 
   // Concurrent: the profile read gates the banner and the stats read fills the
   // cards, and neither depends on the other.
-  const [profile, stats] = await Promise.all([
+  const [profile, stats, activity] = await Promise.all([
     fetchProfile(insforge, user.id, "dashboard/page"),
     fetchDashboardStats(insforge, user.id),
+    fetchRecentActivity(insforge, user.id),
   ]);
 
   const { percent, missing, isComplete } = completeness(profile);
@@ -49,7 +50,7 @@ export default async function DashboardPage() {
           <StatsBar stats={stats} />
 
           <div className="grid gap-6 lg:grid-cols-2">
-            <RecentActivity entries={mockActivity()} />
+            <RecentActivity entries={activity} />
             <BarChart
               title="Company Research Activity"
               data={mockResearchActivity()}
