@@ -1380,6 +1380,49 @@ into `ChartCard`. **There is no charting library** — see the correction on `bu
 - **The gradient id is a module constant, not `useId()`** — hooks are unavailable in a Server
   Component. There is one line chart; give it a prop the day there are two.
 
+### Chart tooltips — `BarChart.tsx`, `LineChart.tsx`
+
+Hover a column or a point and a dark pill names the bucket and its value.
+`bg-overlay` + `text-surface` — the pair feature 01 established for dark surfaces
+— at `rounded-md px-2 py-1 text-xs whitespace-nowrap`, `z-10`, `opacity-0` rising
+to `group-hover:opacity-100` through `transition-opacity`.
+
+- **CSS only. No `"use client"`, no charting library, and all three charts are
+  still Server Components.** Feature 14 declined a charting library partly on the
+  grounds that the charts were static; the tooltips arrived in a later pass and
+  did not overturn that, because `group` / `group-hover` needs no JavaScript.
+  Nothing renders differently at rest — the chart with no pointer on it is
+  byte-identical to what feature 14 built.
+- **The hover target is the whole column, not the bar.** A zero bar is zero
+  pixels tall, and a reader pointing at an empty column is asking the same
+  question as one pointing at a tall one.
+- **The bar tooltip is anchored to the bar's own top edge** (`bottom-full mb-2`
+  inside the height box), so it tracks the value instead of floating at a fixed
+  height. On a zero bar that edge is the baseline, which is where it belongs.
+- **The line chart's dots are DOM, not SVG.** The `<svg>` is
+  `preserveAspectRatio="none"`, so a `<circle>` drawn in it would stretch into an
+  ellipse as the card widens — the same reason the path carries
+  `vector-effect="non-scaling-stroke"`. The dots and tooltips are absolutely
+  positioned siblings placed at the coordinates the path already uses.
+- **The line chart's hover zones are not equal slots.** Its points sit at
+  `i / (n - 1)`, on the plot edges — not at slot centres, which is what the bar
+  chart uses. The first and last get half a zone flush to their edge; a centred
+  zone there would hang outside the plot and swallow hovers over the axis gutter.
+- **The first and last tooltips align an edge to the point rather than centring
+  on it.** Measured: a centred "Sun: 4" cleared the card's right edge by 2px.
+  Every other tooltip centres.
+- **The tooltip uses `srLabel ?? label`, so the score chart reads "60-70%: 5"**
+  while its axis reads "60-70". The axis dropped the unit for width; the tooltip
+  has no such constraint and puts it back.
+- **Tooltips are inside the `aria-hidden` mark layer.** The `sr-only` value list
+  already carries every label and value, so exposing both would read the series
+  twice. Verified in the a11y tree: seven entries per chart, not fourteen.
+- **Hover is a pointer affordance.** There is no keyboard or touch path to a
+  tooltip; the `sr-only` list and the axis are what carry the data otherwise.
+  Giving them one means focusable marks — 13 extra tab stops on the dashboard —
+  or a Client Component. Neither was worth it for a second copy of data the page
+  already exposes.
+
 ### Dashboard page — `app/dashboard/page.tsx`
 
 `AppNavbar active="dashboard"` + `main.flex-1.bg-background` + the full-width page container

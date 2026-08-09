@@ -14,10 +14,9 @@ questions if it could. Details below.
 **Open defect, carried:** searching a country the app does not support returns confidently wrong
 results rather than nothing — "India" was scored as Indianapolis. Details in Notes. Oldest open item,
 and it is now visible on the dashboard: those ten rows are part of the 19 scoring under 50.
-**Standing gap, still open:** `/dashboard` has never been opened signed in. Every browser pass has
-run against a temporary unauthenticated preview route, so the six PostgREST calls features 15 and 16
-add have still never executed against the live API. Feature 17 adds no new query, so the gap did not
-grow. Closing it needs one signed-in visit.
+**Standing gap — CLOSED.** `/dashboard` was opened signed in on 2026-08-09 and looks right. Every
+PostgREST call features 15, 16 and 17 make has now executed against the live API. That gap had been
+open since feature 14.
 **Next:** merge `feat/16-recent-activity` into `main` — it carries 15, 16 and 17.
 
 ---
@@ -1682,3 +1681,49 @@ GitHub session and OAuth cannot be completed on the developer's behalf. Feature 
 query**, so this did not widen the gap features 15 and 16 left; the two reads are the same two, with
 one extra column in the select list, and `fetchRecentActivity` is byte-identical. One signed-in visit
 still closes all three features at once.
+
+### Chart tooltips — added after the signed-in pass
+
+Hovering a chart showed nothing, so the three charts gained hover tooltips: a dark
+`bg-overlay`/`text-surface` pill naming the bucket and its value, plus a dot on the line chart's
+curve. Full pattern in `ui-registry.md`.
+
+**This reverses part of a feature 14 decision, and it cost nothing.** Feature 14 declined a charting
+library partly because "all three charts are static — no tooltips, no legends, no brushing", and
+that was confirmed with the developer at the time. The tooltips are `group` / `group-hover`, which
+is CSS — so there is still no charting library, still no `"use client"` anywhere in the chart chain,
+and the charts at rest render byte-identically to before. Only the reason changed, not the outcome.
+
+Decisions:
+
+- **The hover target is the whole column, not the bar.** A zero bar is zero pixels tall and
+  unhoverable; a reader pointing at an empty column is asking the same question as one pointing at a
+  tall one. The bar's tooltip is anchored to the bar's own top edge so it tracks the value, and on a
+  zero bar that edge is the baseline.
+- **The line chart's dots are DOM, not SVG.** Its `<svg>` is `preserveAspectRatio="none"`, so a
+  `<circle>` inside it would stretch into an ellipse as the card widens — the same reason the path
+  already carries `vector-effect="non-scaling-stroke"`.
+- **Its hover zones are not equal slots.** The line's points sit at `i / (n - 1)`, on the plot
+  edges, not at slot centres like the bars. The first and last get half a zone flush to their edge.
+- **The tooltip uses `srLabel ?? label`**, so the score chart's tooltip reads "60-70%: 5" while its
+  axis reads "60-70" — the axis dropped the unit for width, and a tooltip has no such constraint.
+- **Tooltips sit inside the `aria-hidden` mark layer**, because the `sr-only` list already carries
+  every label and value. Verified in the a11y tree: seven entries per chart, not fourteen.
+
+Found while building: **a centred tooltip on the last line-chart point cleared the card's right edge
+by 2px.** The two edge points now align an edge to the point and grow inwards instead of centring.
+Caught by measuring every tooltip against its own card rect, not by looking — 2px does not read as
+wrong in a screenshot.
+
+**Verified in the browser** at 1470px and an emulated 414px. Hover was driven for real and exactly
+one tooltip and one dot came up (`Thu: 9`, the centre point); then every tooltip was force-shown at
+once to check placement for the edges too, and none escaped its card at either width. Also confirmed
+the seven weekday axis labels are all `rgb(153, 161, 175)` — they look warm-tinted in a screenshot,
+which is subpixel antialiasing rather than a token problem. `tsc`, lint and build clean, every route
+still `ƒ`, preview route confirmed 404.
+
+**Known limitation:** hover is a pointer affordance, so there is no keyboard or touch path to a
+tooltip. The `sr-only` list and the axis carry the data otherwise. Giving the marks a focus path
+means either 13 extra tab stops on the dashboard or a Client Component, and neither was worth it for
+a second copy of data the page already exposes — but if touch users start asking for it, that is the
+trade to revisit.
