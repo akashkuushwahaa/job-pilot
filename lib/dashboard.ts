@@ -1,40 +1,94 @@
 import { z } from "zod";
 
 import type { InsforgeServerClient } from "@/lib/insforge-server";
-import type { ActivityEntry, ChartPoint, DashboardStat } from "@/types";
+import type {
+  ActivityEntry,
+  ChartPoint,
+  DashboardData,
+  DashboardStat,
+} from "@/types";
 
-// The dashboard's data. Feature 15 wired the stats bar to real rows and feature
-// 16 the activity feed; the three chart series are still mock and belong to
-// feature 17, which replaces one function each.
+// The dashboard's data. Every number on the page comes from the user's own rows:
+// feature 15 wired the stats bar, feature 16 the activity feed, and feature 17
+// the three charts.
+//
+// build-plan.md feature 17 specifies PostHog as the chart source. It is not, and
+// the reasons are worth keeping. There is no way to read PostHog from this
+// project at all — the only credential is the write-only public project token,
+// there is no MCP server and no skill, so a read would mean an account-wide
+// personal API key and a hand-rolled HogQL client. More decisively, PostHog
+// could not answer two of the three questions even if it were readable:
+// `job_found` carries { userId, source, matchScore } and no jobId, so distinct
+// jobs cannot be counted, and it fires once per saved row on every run — while
+// `found_at` is deliberately omitted from the discovery upsert so it keeps
+// meaning *first discovered*. A repeated search would inflate the event series
+// and leave the rows correct. PostHog still captures; it is not read from here.
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+// Seven, as feature 14 built and the design draws. build-plan.md feature 17 asks
+// for 30 days on Jobs Found Over Time, which this card cannot label — and seven
+// puts it on the same window as Company Research Activity beside it, so the two
+// can be read against each other.
+const CHART_DAYS = 7;
 
-// Two columns, and only the two the four cards actually need. The average has to
-// be computed over the rows because PostgREST only exposes aggregate functions
-// when the server enables them, and nothing here can prove that from the client
-// side — see the note in progress-tracker.md. A user's own job rows are a bounded
-// set (30 today), and this reads an integer and a timestamp from each.
-const STAT_COLUMNS = "match_score, found_at";
+// **The page has one definition of "the last 7 days", and this is it.** The stat
+// card, both trend baselines and both time charts all measure from here.
+//
+// It used to have two. `Jobs This Week` counted a rolling `now - 7 x 24h` while
+// the charts bucketed seven UTC calendar days, and the calendar window is always
+// the shorter of the pair — by exactly the current time of day, so by up to 23
+// hours. A job found in that band counted on the card and not in the chart, which
+// rendered "Jobs This Week: 1" directly above a chart captioned "No jobs found in
+// the last 7 days". Two surfaces, one window name, opposite answers. Found by
+// `/review` on feature 17.
+//
+// The calendar reading won because it is the one with a visible definition: the
+// chart draws seven labelled days, and a reader can count them.
+function weekStart(now: number): number {
+  return (utcDay(now) - (CHART_DAYS - 1)) * DAY_MS;
+}
+
+// Whole UTC days since the epoch. Integer arithmetic rather than a Date per row,
+// and no local-timezone drift on the way through.
+function utcDay(ms: number): number {
+  return Math.floor(ms / DAY_MS);
+}
+
+// Three columns, and only the three the whole page needs. One read now serves
+// the stats bar and all three charts, which is the same call feature 15 made in
+// choosing two queries over four: these are rows the page has already loaded,
+// and a separate query per chart would be three more round trips to fetch them
+// again. The average has to be computed over the rows because PostgREST only
+// exposes aggregate functions when the server enables them, and nothing here can
+// prove that from the client side. A user's own job rows are a bounded set (30
+// today), and this reads an integer and two timestamps from each.
+const JOB_FACT_COLUMNS = "match_score, found_at, researched_at";
 
 // Nullable rather than `.catch(0)`. A row whose score is missing or unreadable
 // is a row with no score, and folding it in as a zero would drag the average
 // down and report a worse match rate than the user actually has. It counts
-// towards Total Jobs Found and towards nothing else.
-const StatRowSchema = z.object({
+// towards Total Jobs Found and towards nothing else — including the score
+// distribution, which is a chart about scored jobs.
+const JobFactSchema = z.object({
   match_score: z.number().finite().nullable().catch(null),
   found_at: z.string().nullable().catch(null),
+  // Null until the research agent writes a dossier. Never rewritten by a
+  // re-discovery — see the upsert-omission list in agent/adzuna.ts.
+  researched_at: z.string().nullable().catch(null),
 });
 
-type StatRow = z.infer<typeof StatRowSchema>;
+type JobFact = z.infer<typeof JobFactSchema>;
 
-export async function fetchDashboardStats(
+export async function fetchDashboardData(
   insforge: InsforgeServerClient,
   userId: string,
-): Promise<DashboardStat[]> {
+): Promise<DashboardData> {
   const [jobs, researched] = await Promise.all([
-    insforge.database.from("jobs").select(STAT_COLUMNS).eq("user_id", userId),
+    insforge.database
+      .from("jobs")
+      .select(JOB_FACT_COLUMNS)
+      .eq("user_id", userId),
     // head: true asks for the count and no rows. The alternative is selecting
     // company_research to test it, which would pull every dossier on the account
     // across the wire to answer a question about how many there are.
@@ -58,40 +112,30 @@ export async function fetchDashboardStats(
     throw new Error("Dashboard unavailable");
   }
 
-  return buildStats(
-    parseStatRows(jobs.data),
-    researched.count ?? 0,
-    Date.now(),
-  );
+  const rows = parseJobFacts(jobs.data);
+  const now = Date.now();
+
+  return {
+    stats: buildStats(rows, researched.count ?? 0, now),
+    researchActivity: buildResearchActivity(rows, now),
+    jobsFound: buildJobsFound(rows, now),
+    scoreDistribution: buildScoreDistribution(rows),
+  };
 }
 
-export function parseStatRows(rows: unknown): StatRow[] {
-  if (!Array.isArray(rows)) return [];
-
-  const parsed: StatRow[] = [];
-
-  for (const row of rows) {
-    const result = StatRowSchema.safeParse(row);
-
-    if (result.success) {
-      parsed.push(result.data);
-    } else {
-      console.error("[lib/dashboard] dropped an unreadable row");
-    }
-  }
-
-  return parsed;
+export function parseJobFacts(rows: unknown): JobFact[] {
+  return parseRows(rows, JobFactSchema, "job");
 }
 
 // Exported for its own sake: every branch below is a decision about what a
 // number means, and those are worth running rather than eyeballing. `now` is a
 // parameter so the week boundary is testable.
 export function buildStats(
-  rows: StatRow[],
+  rows: JobFact[],
   researchedCount: number,
   now: number,
 ): DashboardStat[] {
-  const cutoff = now - WEEK_MS;
+  const cutoff = weekStart(now);
   const timestamps = rows.map((row) => toTime(row.found_at));
 
   const before = rows.filter((_, index) => {
@@ -140,7 +184,7 @@ export function buildStats(
   ];
 }
 
-function meanScore(rows: StatRow[]): number | null {
+function meanScore(rows: JobFact[]): number | null {
   const scores = rows
     .map((row) => row.match_score)
     .filter((score): score is number => score !== null);
@@ -339,26 +383,145 @@ function parseRows<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Still mock — feature 17 owns these three.
+// The three charts
 // ---------------------------------------------------------------------------
 
-export function mockResearchActivity(): ChartPoint[] {
-  return toSeries(DAYS, [2, 5, 3, 8, 12, 4, 1]);
-}
+// Days are bucketed in UTC, and the label is formatted in UTC to match. The page
+// is server-rendered with no client boundary anywhere in the chart chain, so the
+// reader's own timezone is not knowable without adding one; pinning UTC at least
+// makes the chart identical in development and on the deployed server, which the
+// machine's local zone would not. If the label's zone and the bucket's zone ever
+// disagree, every bar names a different day from the one it counts.
+const CHART_TIME_ZONE = "UTC";
 
-export function mockJobsFound(): ChartPoint[] {
-  return toSeries(DAYS, [12, 46, 38, 64, 85, 52, 14]);
-}
+const weekdayLabel = new Intl.DateTimeFormat("en-US", {
+  weekday: "short",
+  timeZone: CHART_TIME_ZONE,
+});
 
-// The buckets build-plan.md feature 17 names, so the labels the chart renders
-// now are the ones the PostHog grouping will fill later.
-export function mockScoreDistribution(): ChartPoint[] {
-  return toSeries(
-    ["50-60%", "60-70%", "70-80%", "80-90%", "90-100%"],
-    [5, 15, 45, 85, 36],
+// When a dossier was written, not when the job was found — the two are seven to
+// nine hours apart on this database, which is why feature 16 added the column.
+export function buildResearchActivity(
+  rows: JobFact[],
+  now: number,
+): ChartPoint[] {
+  return dailySeries(
+    rows.map((row) => row.researched_at),
+    now,
   );
 }
 
-function toSeries(labels: string[], values: number[]): ChartPoint[] {
-  return labels.map((label, index) => ({ label, value: values[index] ?? 0 }));
+// When a job was *first* discovered. `found_at` is never rewritten by a
+// re-discovery, so a repeated search does not move a job to today.
+export function buildJobsFound(rows: JobFact[], now: number): ChartPoint[] {
+  return dailySeries(
+    rows.map((row) => row.found_at),
+    now,
+  );
+}
+
+// One bucket per UTC day for the last CHART_DAYS days, ending today. A day with
+// nothing in it is a zero rather than a missing bucket: the series has to stay
+// the same length or the axis silently shortens and every label slides onto the
+// wrong bar.
+function dailySeries(values: (string | null)[], now: number): ChartPoint[] {
+  // The clock is the one input in this chain that was not narrowed. A non-finite
+  // `now` makes every bucket boundary NaN and `Intl.DateTimeFormat.format` throws
+  // RangeError on it — a 500 on the whole dashboard, from a chart. Nothing
+  // reaches this with a bad clock today (`Date.now()` is the only caller), but
+  // these are exported functions and lib/charts.ts guards its own inputs for
+  // exactly this reason. An empty series renders the card's empty state, which is
+  // the same degrade an all-zero series gets. Found by `/review` on feature 17.
+  if (!Number.isFinite(now)) {
+    console.error("[lib/dashboard] dailySeries received a non-finite clock");
+
+    return [];
+  }
+
+  const today = utcDay(now);
+  const first = today - (CHART_DAYS - 1);
+  const counts = new Array<number>(CHART_DAYS).fill(0);
+
+  for (const value of values) {
+    const time = toTime(value);
+
+    // Null is the ordinary case here — most rows have no researched_at — so an
+    // absent or unparseable timestamp is skipped without a log. buildActivity
+    // logs because a row it drops is an entry the user does not see; a row
+    // outside the window is simply not in the window.
+    if (time === null) continue;
+
+    const index = utcDay(time) - first;
+
+    if (index >= 0 && index < CHART_DAYS) {
+      counts[index] += 1;
+    }
+  }
+
+  return counts.map((value, index) => ({
+    label: weekdayLabel.format((first + index) * DAY_MS),
+    value,
+  }));
+}
+
+// build-plan.md feature 17 names five buckets starting at 50. This account's
+// scores run 30-65, so those five would silently drop most of its rows — and a
+// distribution that discards data is not a distribution. The sixth bucket is
+// what makes every scored job appear somewhere.
+//
+// Lower-inclusive, upper-exclusive, so 60 lands in "60-70%". The two ends are
+// unbounded: the column carries CHECK (match_score BETWEEN 0 AND 100), but the
+// value arrives here through PostgREST and zod rather than from the constraint,
+// and a score that fell through every bucket would vanish without a trace.
+// The labels carry no "%". The design draws one per bucket, and with five
+// buckets it fits — but the sixth consumes the slack exactly: at 414px the six
+// labelled "50-60%" and up need 274px of the 277px the card has, so they render
+// as one unbroken run with no gap between categories. Measured in the browser,
+// not reasoned about. Dropping the repeated unit costs about 7px each and buys
+// back the same spacing five labels had; the card is titled "Match Score
+// Distribution", so the unit is stated once instead of six times in the
+// tightest row on the page.
+const SCORE_BUCKETS: {
+  label: string;
+  srLabel: string;
+  min: number;
+  max: number;
+}[] = [
+  { label: "<50", srLabel: "under 50%", min: -Infinity, max: 50 },
+  { label: "50-60", srLabel: "50-60%", min: 50, max: 60 },
+  { label: "60-70", srLabel: "60-70%", min: 60, max: 70 },
+  { label: "70-80", srLabel: "70-80%", min: 70, max: 80 },
+  { label: "80-90", srLabel: "80-90%", min: 80, max: 90 },
+  { label: "90-100", srLabel: "90-100%", min: 90, max: Infinity },
+];
+
+// All time, like Avg. Match Rate — this is a question about the shape of
+// someone's matches, not about this week. An unscored row is excluded, the same
+// rule the average follows: it counts towards Total Jobs Found and nothing else.
+export function buildScoreDistribution(rows: JobFact[]): ChartPoint[] {
+  const counts = new Array<number>(SCORE_BUCKETS.length).fill(0);
+
+  for (const row of rows) {
+    const score = row.match_score;
+
+    if (score === null) continue;
+
+    const index = SCORE_BUCKETS.findIndex(
+      (bucket) => score >= bucket.min && score < bucket.max,
+    );
+
+    if (index !== -1) {
+      counts[index] += 1;
+    }
+  }
+
+  // srLabel keeps the unit the visual label had to give up. Horizontal space is
+  // what forced "60-70" on screen; a screen reader has no such constraint, and
+  // "60-70: 5" read aloud loses what the number is a range of. Found by
+  // `/review` on feature 17.
+  return SCORE_BUCKETS.map((bucket, index) => ({
+    label: bucket.label,
+    srLabel: bucket.srLabel,
+    value: counts[index],
+  }));
 }

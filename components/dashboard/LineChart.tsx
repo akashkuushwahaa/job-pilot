@@ -69,7 +69,7 @@ export function LineChart({ title, data, emptyMessage }: Props) {
         {data.map((point, index) => (
           <li
             key={`${point.label}-${index}`}
-          >{`${point.label}: ${point.value}`}</li>
+          >{`${point.srLabel ?? point.label}: ${point.value}`}</li>
         ))}
       </ul>
     </ChartCard>

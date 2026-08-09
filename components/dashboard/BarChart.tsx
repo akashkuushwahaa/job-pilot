@@ -50,7 +50,7 @@ export function BarChart({ title, data, tone, emptyMessage }: Props) {
         {data.map((point, index) => (
           <li
             key={`${point.label}-${index}`}
-          >{`${point.label}: ${point.value}`}</li>
+          >{`${point.srLabel ?? point.label}: ${point.value}`}</li>
         ))}
       </ul>
     </ChartCard>
