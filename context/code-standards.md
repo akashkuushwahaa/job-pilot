@@ -236,12 +236,21 @@ All PostHog events must use these exact event names. Never invent new event name
 | `profile_completed`  | User saves complete profile for first time | server | userId                     |
 | `company_researched` | Company research dossier generated         | server | userId, jobId, company     |
 
-`job_found` powers the Jobs Found Over Time and Match Score Distribution dashboard charts.
-`company_researched` powers the Company Research Activity dashboard chart.
-Always fire these with correct properties.
+> Corrected in feature 17. These two lines used to read that `job_found` "powers the Jobs Found
+> Over Time and Match Score Distribution dashboard charts" and `company_researched` "powers the
+> Company Research Activity dashboard chart". **No dashboard chart reads PostHog.** All three read
+> the user's own `jobs` rows — `found_at`, `match_score` and `researched_at`. PostHog cannot be read
+> from this project at all (the only credential is the write-only project token, and there is no MCP
+> server or skill), and `job_found` could not answer two of the three questions even if it could be:
+> it carries no `jobId`, so distinct jobs cannot be counted, and it fires once per saved row on
+> every run while `found_at` deliberately does not move on a re-discovery. See `build-plan.md`
+> feature 17.
 
-None of the four are wired yet — they belong to features 06, 10 and 13. Wire each one in the
-feature that creates the action it measures, never earlier.
+These four still fire, and are still the product's event record — they are simply not a read source.
+Always fire them with correct properties.
+
+All four are wired: `job_search_started` and `job_found` in feature 10, `profile_completed` in
+feature 06, `company_researched` in feature 13. (This line previously said none were wired yet.)
 
 ### Auth lifecycle events
 

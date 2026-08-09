@@ -8,6 +8,8 @@ import { Search, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { ADZUNA_MARKETS, type AdzunaCountry } from "@/lib/adzuna";
 import { cn } from "@/lib/utils";
 
 const SEARCH_ERROR = "Could not search for jobs. Please retry.";
@@ -20,12 +22,16 @@ type Banner = { kind: "error" | "success"; message: string } | null;
 type Props = {
   userId: string;
   blocked: boolean;
+  // Seeded from the saved profile location by the page. Only the initial value —
+  // once the user touches the select, this stops mattering.
+  defaultCountry: AdzunaCountry;
 };
 
-export function SearchControls({ userId, blocked }: Props) {
+export function SearchControls({ userId, blocked, defaultCountry }: Props) {
   const router = useRouter();
   const [jobTitle, setJobTitle] = useState("");
   const [location, setLocation] = useState("");
+  const [country, setCountry] = useState<AdzunaCountry>(defaultCountry);
   const [isSearching, setIsSearching] = useState(false);
   const [status, setStatus] = useState<Banner>(null);
 
@@ -53,7 +59,11 @@ export function SearchControls({ userId, blocked }: Props) {
       const response = await fetch("/api/agent/find", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobTitle: title, location: location.trim() }),
+        body: JSON.stringify({
+          jobTitle: title,
+          location: location.trim(),
+          country,
+        }),
       });
 
       const result = await response.json();
@@ -80,7 +90,7 @@ export function SearchControls({ userId, blocked }: Props) {
     <section className="rounded-xl border border-border bg-surface p-6 shadow-sm">
       <form
         onSubmit={(event) => void findJobs(event)}
-        className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+        className="grid gap-4 sm:grid-cols-2 sm:items-end lg:grid-cols-[1fr_1fr_auto_auto]"
       >
         <Field label="Job title" htmlFor="job-title">
           <div className="relative">
@@ -100,15 +110,36 @@ export function SearchControls({ userId, blocked }: Props) {
           </div>
         </Field>
 
+        {/* The placeholder no longer invites a country. Location is a place
+            *within* the selected market now, and typing "India" here is exactly
+            what used to produce Indianapolis. */}
         <Field label="Location" htmlFor="location">
           <Input
             id="location"
             name="location"
-            placeholder="Remote, New York..."
+            placeholder="Remote, Bengaluru, New York..."
             value={location}
             disabled={isSearching}
             onChange={(event) => setLocation(event.target.value)}
           />
+        </Field>
+
+        <Field label="Country" htmlFor="country">
+          <Select
+            id="country"
+            name="country"
+            value={country}
+            disabled={isSearching}
+            onChange={(event) =>
+              setCountry(event.target.value as AdzunaCountry)
+            }
+          >
+            {ADZUNA_MARKETS.map((market) => (
+              <option key={market.code} value={market.code}>
+                {market.name}
+              </option>
+            ))}
+          </Select>
         </Field>
 
         {/* Button `md` is h-9 while every form control is h-10, so a button on a

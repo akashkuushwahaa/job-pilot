@@ -36,12 +36,25 @@ export function BarChart({ title, data, tone, emptyMessage }: Props) {
         {data.map((point, index) => (
           <div
             key={`${point.label}-${index}`}
-            className="flex h-full flex-1 items-end justify-center"
+            className="group flex h-full flex-1 items-end justify-center"
           >
-            <span
+            {/* The hover target is the whole column, not the bar. A zero or
+                near-zero bar is a few pixels tall and effectively unhoverable,
+                and a reader pointing at an empty column is asking the same
+                question as one pointing at a tall one. */}
+            <div
               style={{ height: `${plotPercent(point.value, ceiling)}%` }}
-              className={cn("w-[46%]", BAR_FILL[tone])}
-            />
+              className="relative w-[46%]"
+            >
+              <span className={cn("absolute inset-0", BAR_FILL[tone])} />
+
+              {/* Anchored to the bar's own top edge, so it tracks the value
+                  rather than floating at a fixed height. On a zero bar that
+                  edge is the baseline, which is where the tooltip belongs. */}
+              <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 rounded-md bg-overlay px-2 py-1 text-xs whitespace-nowrap text-surface opacity-0 transition-opacity group-hover:opacity-100">
+                {`${point.srLabel ?? point.label}: ${point.value}`}
+              </span>
+            </div>
           </div>
         ))}
       </div>
@@ -50,7 +63,7 @@ export function BarChart({ title, data, tone, emptyMessage }: Props) {
         {data.map((point, index) => (
           <li
             key={`${point.label}-${index}`}
-          >{`${point.label}: ${point.value}`}</li>
+          >{`${point.srLabel ?? point.label}: ${point.value}`}</li>
         ))}
       </ul>
     </ChartCard>

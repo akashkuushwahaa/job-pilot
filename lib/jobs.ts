@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { marketName, type AdzunaCountry } from "@/lib/adzuna";
 import { parseDossier } from "@/lib/dossier";
 import type { InsforgeServerClient } from "@/lib/insforge-server";
 import { MATCH_THRESHOLD, safeExternalUrl } from "@/lib/utils";
@@ -67,21 +68,32 @@ export function parseJobList(rows: unknown): JobListItem[] {
 // saved 4 strong matches", which says only the strong ones were kept —
 // project-overview.md requires every job visible regardless of score, and all
 // of them are saved. Reworded so the count and the table agree.
-export function discoveryMessage(scores: number[]): string {
+//
+// It also names the market. A search that ran against the wrong country is
+// otherwise invisible until the user reads the locations in the table and finds
+// another continent — which is exactly how the Indianapolis rows went unnoticed.
+// Naming it costs three words and makes a wrong market self-evident, including
+// on the zero-result sentence, where it is the most likely explanation.
+export function discoveryMessage(
+  scores: number[],
+  country: AdzunaCountry,
+): string {
+  const market = marketName(country);
+
   if (scores.length === 0) {
-    return "No jobs found for that search. Try a broader title or location.";
+    return `No jobs found in ${market} for that search. Try a broader title, or a different country.`;
   }
 
   const strong = scores.filter((score) => score >= MATCH_THRESHOLD).length;
   const jobs = scores.length === 1 ? "1 job" : `${scores.length} jobs`;
 
   if (strong === 0) {
-    return `Found ${jobs}. None cleared ${MATCH_THRESHOLD}% — they are all listed below.`;
+    return `Found ${jobs} in ${market}. None cleared ${MATCH_THRESHOLD}% — they are all listed below.`;
   }
 
   const matches = strong === 1 ? "1 is a strong match" : `${strong} are strong matches`;
 
-  return `Found ${jobs} — ${matches}.`;
+  return `Found ${jobs} in ${market} — ${matches}.`;
 }
 
 // Adzuna's search endpoint returns a 500-character snippet that stops mid-word

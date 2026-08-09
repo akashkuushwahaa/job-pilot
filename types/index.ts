@@ -267,4 +267,19 @@ export type ActivityEntry = {
 export type ChartPoint = {
   label: string;
   value: number;
+  // What the sr-only value list says instead of `label`, when the two differ.
+  // Category labels are sized by the narrowest card they render in, and the
+  // score buckets had to drop their "%" to fit six of them at 414px — a
+  // constraint that does not apply to a screen reader. Optional: a series whose
+  // label reads correctly aloud sets nothing.
+  srLabel?: string;
+};
+
+// Everything /dashboard reads from the user's own job rows, in one shape,
+// because it comes from one query — the stats bar and all three chart series.
+export type DashboardData = {
+  stats: DashboardStat[];
+  researchActivity: ChartPoint[];
+  jobsFound: ChartPoint[];
+  scoreDistribution: ChartPoint[];
 };

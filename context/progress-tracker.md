@@ -6,21 +6,18 @@ Update this file after every completed feature. Any AI agent reading this should
 
 ## Current Status
 
-**Phase:** Phase 5 — Dashboard, in progress
-**Last completed:** 15 Stats Bar — Real Data. The four cards read the user's own `jobs` rows through
-`fetchDashboardStats()`; no component changed, because feature 14 built them against
-`DashboardStat[]`. Live account renders 30 / 51% / 2 / 30 with no trend badges — every row was
-discovered on one day, so there is no previous week to compare against.
-**Corrected, 2026-08-03:** feature 13's research agent **has run**, twice, end to end — the standing
-note that it never had is wrong. `agent_logs` records both runs on 2026-08-02, each reading 4 pages
-(`votoconsulting.com` 16:36-16:37, `oracle.com` 16:53-16:54) and saving a complete nine-field
-dossier. Both rows carry 4 `sources`, so the browser phase genuinely reached the employer's site.
-**Open defect, carried:** searching a country the app does not support returns confidently wrong
-results rather than nothing — "India" was scored as Indianapolis. Details in Notes. Oldest open item;
-a third search has since taken the table to 30 rows.
-**Next:** 16 Recent Activity — Real Data. It merges `agent_runs` and researched `jobs` into
-`ActivityEntry[]` and replaces `mockActivity()`. Note the shape problem feature 13 left: research
-runs write no `agent_runs` row, so the merge has to read `agent_logs` or the `jobs` rows directly.
+**Phase:** Phase 5 — Dashboard, complete. **All 17 features are built.**
+**Last completed:** 17 Analytics Charts — Real Data. The last three mock functions are gone, and
+`/dashboard` now renders entirely from the user's own rows. **The source is the database, not
+PostHog** — PostHog cannot be read from this project at all, and could not answer two of the three
+questions if it could. Details below.
+**Oldest open defect — FIXED.** Searching a country the app did not support returned confidently
+wrong results rather than nothing ("India" → Indianapolis). The market is now an explicit field on the
+search form covering all 19 Adzuna markets, and nine of the ten bad rows are gone. Details below.
+**Standing gap — CLOSED.** `/dashboard` was opened signed in on 2026-08-09 and looks right. Every
+PostgREST call features 15, 16 and 17 make has now executed against the live API. That gap had been
+open since feature 14.
+**Next:** merge `feat/16-recent-activity` into `main` — it carries 15, 16 and 17.
 
 ---
 
@@ -55,8 +52,8 @@ runs write no `agent_runs` row, so the merge has to read `agent_logs` or the `jo
 
 - [x] 14 Dashboard Page — Full UI
 - [x] 15 Stats Bar — Real Data
-- [ ] 16 Recent Activity — Real Data
-- [ ] 17 Analytics Charts — PostHog Data
+- [x] 16 Recent Activity — Real Data
+- [x] 17 Analytics Charts — Real Data (database, not PostHog)
 
 ---
 
@@ -1461,3 +1458,368 @@ the question is the right one.
 **Also unverifiable with today's data:** no trend badge can render, because every row was discovered
 on the same day and there is no previous week. The three tones were confirmed in the browser during
 feature 14's review pass; what has not been seen is a badge driven by real data.
+
+### Feature 16 — Recent Activity (Real Data)
+
+`mockActivity()` deleted; `fetchRecentActivity()` merges completed `agent_runs` with researched
+`jobs`. `RecentActivity` did not change — feature 14 built it against `ActivityEntry[]`, so this is
+the second consecutive feature that swapped a data source and touched no component.
+
+**Found before writing any code, and it changed the feature:** a `jobs` row had **no timestamp for
+its dossier**. `build-plan.md` feature 16 says to "merge and sort all by created_at descending",
+which assumes one exists. The only candidate was `found_at`, and on the live rows that is **seven to
+nine hours before the research actually ran** — Oracle was found at 07:33:54 and researched at
+16:54:25. Sorting on it would have put the *oldest* research entry first and rendered "Yesterday"
+under a run that finished minutes earlier. Migration
+`20260803090000_jobs-researched-at.sql` adds `jobs.researched_at`, backfills the two existing rows
+from `agent_logs`, and adds a partial index on `(user_id, researched_at DESC)`.
+`agent/research.ts` now writes it in the same statement as the dossier.
+
+Decisions:
+
+- **The timestamp is a column, not a string match on `agent_logs`.** Deriving it from the
+  "Saved a company dossier for X" message was the alternative and was rejected twice over:
+  `agent/logs.ts` is explicitly allowed to fail silently, so a run can succeed while writing no log
+  row, and keying on prose a future edit can reword is the failure mode `JobDescription` already
+  documents.
+- **`researched_at` joins `company_research` and `found_at` in the upsert-omission list.** A
+  re-discovery that reset it would move a research entry to the moment the job was re-found.
+  Recorded in `agent/adzuna.ts` and as an `architecture.md` invariant.
+- **Only `completed` runs become entries.** This database has a failed run for "Frontend Developer";
+  rendering it as "Found 0 jobs for Frontend Developer" states something untrue, and a failure entry
+  would need a third dot colour and an error treatment neither the design nor `ui-tokens.md`
+  defines. The feed says nothing rather than something wrong.
+- **Zero is a real outcome, and it reads as "No jobs found for X".** Feature 10 saves a run that
+  found nothing; "Found 0 jobs" reads as a bug rather than as a result. Singular gets "1 job".
+- **Entry ids are namespaced** — `run-{uuid}` / `job-{uuid}` — because the two halves come from
+  different tables and nothing guarantees they cannot collide as React keys.
+- **An exact timestamp tie breaks on id.** Same rule every `jobs` ordering follows: without a unique
+  final key two events written in the same millisecond can swap places between requests.
+- **Each source is read to the display limit, not to half of it.** Five and five, merged, then
+  truncated to five — otherwise a day with five searches and no research would show three entries.
+- **A row that cannot be rendered is dropped, not faked.** A run with no usable timestamp, a research
+  row with no company or no `researched_at` — each is logged and skipped rather than rendered with an
+  invented value. A completed run missing `completed_at` falls back to `started_at`, which costs the
+  entry precision rather than its place.
+
+**Verified by execution:** 15 checks over `buildActivity` — every sentence form (plural, singular,
+zero, missing title), the interleaving of both kinds by time, namespaced ids, truncation to five,
+tie-breaking, and six ways a row can be unrenderable. Then **the real rows from the live database
+were fed through it**, and the feed came out as:
+
+```
+research  16:54:25  Researched Oracle
+research  16:37:18  Researched Voto Consulting LLC
+search    09:00:27  Found 10 jobs for Frontend Developer
+search    07:50:29  Found 10 jobs for Software Developer
+search    07:33:54  Found 10 jobs for Backend Developer
+```
+
+Exactly five entries, newest first, with the failed run absent. **Under the old `found_at` ordering
+Oracle would have been last rather than first** — which is the clearest evidence the migration was
+necessary rather than tidy.
+
+The migration was applied to the live database and read back: both dossier rows now carry a
+`researched_at` seven and nine hours after their `found_at`. `tsc`, lint and build all clean.
+
+**Not verified:** the two PostgREST calls have not run against the live API — same gap as feature 15,
+and the same fix, one signed-in visit to `/dashboard`. What is untested is whether the SDK emits
+`researched_at=not.is.null` and `status=eq.completed` as intended, not whether the questions are
+right.
+
+### Feature 17 — Analytics Charts (Real Data)
+
+`mockResearchActivity()`, `mockJobsFound()` and `mockScoreDistribution()` deleted; `fetchDashboardStats`
+became `fetchDashboardData`, which returns the stats bar and all three chart series from one read.
+`BarChart`, `LineChart` and `ChartCard` did not change — the third consecutive feature to swap a data
+source and touch no component. Designed through `/architect`, and the plan's main decision was
+overturning the build plan's data source before any code was written.
+
+**The source is the database, not PostHog, and `build-plan.md` feature 17 is wrong about it in four
+separate ways.** Checked before building:
+
+- **PostHog cannot be read from this project at all.** `.mcp.json` has two servers, `insforge` and
+  `chrome-devtools` — no PostHog MCP, and no PostHog skill is installed. A repo-wide search for
+  `POSTHOG_PERSONAL_API_KEY`, `POSTHOG_API_KEY` and `phx_` returns zero hits: the only credential is
+  `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN`, a public write-only ingestion token. Reading would mean
+  minting an account-wide personal API key, shipping it in server env and hand-rolling a HogQL
+  client — a new credential and a new client, to fetch data Postgres already holds.
+- **It could not answer two of the three questions even if it could be read.** `job_found` carries
+  `{ userId, source, matchScore }` and **no `jobId`**, so distinct jobs cannot be counted at all. It
+  also fires once per saved row on *every* run, including a re-discovery the upsert correctly treats
+  as the same job — while `found_at` is deliberately omitted from that upsert so it keeps meaning
+  *first discovered*. A repeated search would inflate the PostHog series and leave the rows correct.
+- **PostHog is lossy where Postgres is exact.** `captureImmediate` resolves even when delivery
+  failed, and whether `job_found` and `company_researched` have ever arrived has still never been
+  confirmed. That question is no longer blocking, because nothing reads them.
+- **PostHog still captures.** No event was removed. It stopped being a *read* dependency.
+
+Decisions:
+
+- **One read serves four surfaces.** `researched_at` joined `match_score, found_at` in the stats
+  select, so feature 17 adds **no query at all** — the rows the charts need are rows the page had
+  already loaded. Three separate chart reads would have been three more round trips for the same 30
+  rows. Same call feature 15 recorded in choosing two queries over four. `StatRow` / `parseStatRows`
+  became `JobFact` / `parseJobFacts` because those rows no longer feed only the stats bar, and
+  `parseJobFacts` now delegates to the file's own generic `parseRows<T>` instead of hand-rolling the
+  same per-row `safeParse` loop a second time.
+- **Both time charts cover 7 days, not the build plan's 30.** Feature 14 built and the design draws
+  seven points; thirty daily labels do not fit the card. Seven also puts Jobs Found Over Time on the
+  same window as Company Research Activity beside it, so the two can be read against each other.
+- **Days are bucketed in UTC, and the label is formatted in UTC to match.** The page has no client
+  boundary anywhere in the chart chain, so the reader's timezone is not knowable without adding one.
+  Pinning UTC at least makes the chart identical in development and on the deployed server, which
+  the machine's local zone would not. **If the label's zone and the bucket's zone ever disagree,
+  every bar names a different day from the one it counts** — there is a check for exactly that.
+- **A day with no rows is a zero, not a missing bucket.** The series has to stay seven long or the
+  axis silently shortens and every label slides onto the wrong bar.
+- **The score distribution has six buckets, not the design's five.** The five start at 50, and this
+  account's scores run 30-65: **19 of its 30 rows score under 50** and would have been dropped
+  entirely from a chart whose whole job is to show the distribution. Nearly two thirds of the
+  account, invisible. Lower-inclusive and upper-exclusive so 60 lands in `60-70`, with both end
+  buckets unbounded — the column carries `CHECK (match_score BETWEEN 0 AND 100)`, but the value
+  arrives through PostgREST and zod rather than from the constraint, and a score falling through
+  every bucket would vanish without a trace.
+- **The distribution is all-time and excludes unscored rows**, the same rule Avg. Match Rate
+  follows: a row with no score counts towards Total Jobs Found and towards nothing else.
+- **`researched_at` for the research chart, never `found_at`.** On this database the two are seven
+  to nine hours apart, which is why feature 16 added the column.
+
+Found while building — both by running the thing, not by reading it:
+
+- **The two windowed empty states were claiming something false.** `/architect` had concluded the
+  existing copy "is correct for real data and does not change". It is not: every row on this account
+  was found on 2026-08-02, which is one day outside today's window, so both time charts render their
+  empty state — under the words "No jobs found yet" and "No companies researched yet", to a user
+  with 30 jobs and 2 dossiers. Now "No jobs found **in the last 7 days**" and "No companies
+  researched **in the last 7 days**", which is true for a new account as well. Match Score
+  Distribution keeps "yet" because it is all-time.
+- **The sixth bucket broke the narrow layout, and the fix was in the labels.** `flex-1` carries
+  `min-width: auto`, so a `whitespace-nowrap` label wider than its equal share expands and steals
+  from its neighbours. At 414px the six labels `<50%`…`90-100%` needed 274px of the 277px available
+  and rendered as **one unbroken run with no gap** — `<50%50-60%60-70%70-80%80-90%90-100%` — with
+  slots no longer equal and every label drifting up to 8px off its bar. Five labels needed 239px of
+  the same 277px, so this was a regression the sixth category introduced. Dropping the repeated `%`
+  returned about 7px each: equal slots, **zero drift**, and 8.1px of gap. The unit is stated once in
+  the card title instead of six times in the tightest row on the page. **A resized browser window
+  bottoms out around 500px and hides this entirely — it took emulating a real 414px viewport.**
+
+**Verified by execution: 60 checks.** 46 over the three builders — the window edge in both
+directions, a future row, a UTC-midnight timestamp landing on the bucket its own label names, the
+last instant of the same UTC day still landing there, labels rolling with the weekday rather than
+staying Mon-first, all seven labels distinct (the line chart keys on the label alone), every bucket
+boundary at 49/50/59/60/89/90/100, a score outside 0-100 in both directions, an unscored row
+excluded, and null or unparseable timestamps skipped.
+
+Then **the 30 real rows were pulled out of the live database and fed through the real parse and the
+real builders**, asserted against Postgres's own aggregates. The distribution came out
+`[19, 1, 5, 2, 3, 0]`, matching a SQL `GROUP BY` on the same `CASE` expression exactly, and summing
+to 30. Both time charts came out all-zero, matching `count(*) WHERE found_at >= …` = 0 and the same
+for `researched_at` — every row is dated 2026-08-02 and the window starts 2026-08-03. Run against
+the previous day's clock, the same rows produce `[30, 0, 0, 0, 0, 0, 0]` and `[2, 0, 0, 0, 0, 0, 0]`
+under a `Sun` first label, which is what the charts rendered yesterday. `buildStats` over the same
+rows still returns 30 / 51% / 2, with Jobs This Week now correctly 0.
+
+**Browser pass, 2026-08-09**, on a temporary preview route (since deleted, confirmed 404) at 1470px,
+834px and an emulated 414px — three states: today's live data, the same rows a day earlier, and a
+spread across all seven days. Both empty states render with the corrected copy; the distribution
+draws six bars on a 0-20 axis; the line chart's curve and the seven weekday labels survive every
+width; console clean at all three. `tsc`, lint and `npm run build` all clean, every route still `ƒ`,
+`/dashboard` still 307s to `/login` signed out.
+
+### Feature 17 — issues found by `/review` and fixed
+
+Seven findings, five fixed in the same session. Two mattered.
+
+- **Important — the page carried two different definitions of "the last 7 days", and they
+  contradicted each other on screen.** `Jobs This Week` counted a rolling `now - 7 x 24h` while both
+  time charts bucketed seven UTC calendar days. The calendar window is always the shorter of the
+  pair, by exactly the current time of day — so by up to 23 hours. Reproduced: a job found 6.8 days
+  ago gave `Jobs This Week: 1` directly above a chart captioned "No jobs found in the last 7 days".
+  Same page, same window name, opposite answers. Fixed with one `weekStart(now)` that the stat card,
+  **both trend baselines** and both charts now share; `WEEK_MS` is gone. The calendar reading won
+  because it is the one with a visible definition — the chart draws seven labelled days and a reader
+  can count them.
+- **Important — three context files still told readers the charts read PostHog.** Feature 17
+  corrected `build-plan.md`, `architecture.md`'s chart invariant, `ui-registry.md` and this file, and
+  missed `code-standards.md` ("`job_found` powers the Jobs Found Over Time and Match Score
+  Distribution dashboard charts"), `architecture.md`'s own stack table, and three lines in
+  `project-overview.md`. All corrected. `code-standards.md` also still said none of the four product
+  events were wired, which stopped being true at feature 13.
+- **Minor — a non-finite clock took the whole dashboard down.** `buildJobsFound(rows, NaN)` threw
+  `RangeError: Invalid time value` out of `Intl.DateTimeFormat.format` — a 500 on the page, from a
+  chart. Unreachable today (`Date.now()` is the only caller) but these are exported functions, and
+  `lib/charts.ts` guards its own inputs for exactly this reason: the clock was the one input in the
+  chain that was never narrowed. Now logs and returns an empty series, which renders the card's
+  empty state — the same degrade an all-zero series already gets.
+- **Minor — the `sr-only` value list lost its unit.** Dropping the `%` fixed the visual crowding at
+  414px, but the screen-reader list went from "60-70%: 1" to "60-70: 1" — and horizontal space, the
+  entire reason for the change, is not a constraint a screen reader has. `ChartPoint` gained an
+  optional `srLabel` that both charts prefer in their `sr-only` list; the score buckets set it
+  ("under 50%", "50-60%", …) and the weekday series does not, because weekday names already read
+  correctly aloud.
+- **Minor — `DashboardData` was declared in `lib/dashboard.ts`** while every other shared shape
+  (`ChartPoint`, `DashboardStat`, `ActivityEntry`) lives in `types/index.ts`. Moved.
+
+Two findings were recorded without a code change: the plan's own instruction to do the signed-in
+browser pass **before** writing code was inverted when OAuth could not be completed (see below), and
+the empty-state copy and label format both changed despite the plan saying they would not — the plan
+was wrong on both, and the reasons are above.
+
+**Verified by execution:** 11 further checks, and the count above includes them. The card and the
+chart now agree on a 6.8-day-old row (the exact case that used to disagree), on a 2-day-old row, and
+on the boundary instant itself in both directions; `NaN`, `Infinity` and `-Infinity` clocks all
+return an empty series rather than throwing, and `buildStats` survives one too; the visual labels
+stay short while the sr labels keep the unit; and the weekday series sets no `srLabel`. Re-read in
+the browser at an emulated 414px: `maxDrift` still 0, `minGap` still 8.1px, and the `sr-only` list
+now reads "under 50%: 19 / 50-60%: 1 / 60-70%: 5 / …" while the visible axis still reads
+"<50 / 50-60 / 60-70". Console clean. `tsc`, lint and build clean, `/dashboard` still 307s signed
+out, preview route confirmed 404.
+
+**Not verified:** `/dashboard` has still never been opened signed in — the browser profile has no
+GitHub session and OAuth cannot be completed on the developer's behalf. Feature 17 **adds no new
+query**, so this did not widen the gap features 15 and 16 left; the two reads are the same two, with
+one extra column in the select list, and `fetchRecentActivity` is byte-identical. One signed-in visit
+still closes all three features at once.
+
+### Chart tooltips — added after the signed-in pass
+
+Hovering a chart showed nothing, so the three charts gained hover tooltips: a dark
+`bg-overlay`/`text-surface` pill naming the bucket and its value, plus a dot on the line chart's
+curve. Full pattern in `ui-registry.md`.
+
+**This reverses part of a feature 14 decision, and it cost nothing.** Feature 14 declined a charting
+library partly because "all three charts are static — no tooltips, no legends, no brushing", and
+that was confirmed with the developer at the time. The tooltips are `group` / `group-hover`, which
+is CSS — so there is still no charting library, still no `"use client"` anywhere in the chart chain,
+and the charts at rest render byte-identically to before. Only the reason changed, not the outcome.
+
+Decisions:
+
+- **The hover target is the whole column, not the bar.** A zero bar is zero pixels tall and
+  unhoverable; a reader pointing at an empty column is asking the same question as one pointing at a
+  tall one. The bar's tooltip is anchored to the bar's own top edge so it tracks the value, and on a
+  zero bar that edge is the baseline.
+- **The line chart's dots are DOM, not SVG.** Its `<svg>` is `preserveAspectRatio="none"`, so a
+  `<circle>` inside it would stretch into an ellipse as the card widens — the same reason the path
+  already carries `vector-effect="non-scaling-stroke"`.
+- **Its hover zones are not equal slots.** The line's points sit at `i / (n - 1)`, on the plot
+  edges, not at slot centres like the bars. The first and last get half a zone flush to their edge.
+- **The tooltip uses `srLabel ?? label`**, so the score chart's tooltip reads "60-70%: 5" while its
+  axis reads "60-70" — the axis dropped the unit for width, and a tooltip has no such constraint.
+- **Tooltips sit inside the `aria-hidden` mark layer**, because the `sr-only` list already carries
+  every label and value. Verified in the a11y tree: seven entries per chart, not fourteen.
+
+Found while building: **a centred tooltip on the last line-chart point cleared the card's right edge
+by 2px.** The two edge points now align an edge to the point and grow inwards instead of centring.
+Caught by measuring every tooltip against its own card rect, not by looking — 2px does not read as
+wrong in a screenshot.
+
+**Verified in the browser** at 1470px and an emulated 414px. Hover was driven for real and exactly
+one tooltip and one dot came up (`Thu: 9`, the centre point); then every tooltip was force-shown at
+once to check placement for the edges too, and none escaped its card at either width. Also confirmed
+the seven weekday axis labels are all `rgb(153, 161, 175)` — they look warm-tinted in a screenshot,
+which is subpixel antialiasing rather than a token problem. `tsc`, lint and build clean, every route
+still `ƒ`, preview route confirmed 404.
+
+**Known limitation:** hover is a pointer affordance, so there is no keyboard or touch path to a
+tooltip. The `sr-only` list and the axis carry the data otherwise. Giving the marks a focus path
+means either 13 extra tab stops on the dashboard or a Client Component, and neither was worth it for
+a second copy of data the page already exposes — but if touch users start asking for it, that is the
+trade to revisit.
+
+### Country selection — the oldest open defect, closed
+
+`detectCountry()` used to read the free-text Location field and fall back to `us` when it recognised
+nothing. A search for "India" therefore ran against the US index and returned ten Indianapolis
+listings — confidently wrong rather than empty, which is the worst shape a wrong answer can take.
+`ADZUNA_COUNTRIES` is now all **19 markets Adzuna actually serves**, and the market is chosen by the
+user rather than guessed.
+
+**All 19 were verified against the live API before the list was widened**, with `category=it-jobs`,
+and their IT job counts recorded: us 371,374 · in 86,206 · gb 35,754 · ca 17,693 · au 11,891 ·
+za 10,299 · sg 10,104 · fr 8,867 · pl 7,232 · de 2,906 · es 1,174 · br 989 · mx 964 · nl 836 ·
+it 760 · nz 701 · be 481 · at 367 · ch 338. `ie` and `ae` answer 404 and are not Adzuna markets.
+**India is the second-largest market on the platform** — the one the app was silently redirecting.
+
+Decisions:
+
+- **The old comment justifying four markets was wrong on both counts.** It claimed the others were
+  "a separate host path and an untested category vocabulary"; the path differs only in the country
+  segment, and `it-jobs` returns results in all nineteen. A short list cost nothing to widen and cost
+  a real defect to keep.
+- **`detectCountry` survives but is demoted to seeding.** It reads the saved *profile* location to
+  preselect the field — never the search box. The difference is that a wrong guess is now visible in
+  a select and one click from being corrected, instead of silently deciding the query.
+- **The route validates the country with `z.enum(ADZUNA_COUNTRIES)` rather than defaulting.** A
+  country the server does not serve is a broken client, and answering it with a US search is the
+  exact failure being removed.
+- **The banner names the market**: "Found 10 jobs in India — 3 are strong matches." The zero-result
+  sentence names it too and suggests changing country, because a wrong market is the likeliest reason
+  a real search returns nothing.
+- **Salary symbols come from `Intl.NumberFormat`, not a table.** Nineteen hand-written symbols is a
+  table to get wrong; only the ISO code is stated. `currencyDisplay` stays at the default `"symbol"`
+  — `"narrowSymbol"` collapses AUD, CAD, SGD, MXN and NZD to a bare `$`, so a Singapore salary would
+  read as US dollars. Compact notation also absorbs the old `formatAmount`'s sub-1000 rule for free.
+- **The Location placeholder no longer invites a country** — "Remote, Bengaluru, New York…". Typing a
+  country there is what produced Indianapolis.
+
+**Two things visible in the rendering changed**: salaries read `£70K` rather than `£70k` (Intl's
+compact notation capitalises), and Canada renders `CA$` rather than `C$`. Neither is specified in any
+design file.
+
+**Verified by execution: 44 checks.** 34 over the market list, the seeding heuristic and the banner —
+including that **Indiana is not India** and **Austria is not Australia** (both one word-boundary away
+from being wrong), that California is still not Canada, that all 19 markets seed correctly from a
+plausible profile location, and every banner form. 10 over the salary formatter across all 19
+markets, confirming no two dollar-markets render identically.
+
+**Two real bugs the checks caught, neither visible by reading:** the market list had **Austria before
+Australia** — they diverge at the fifth letter, where "a" sorts before "i" — and an expected-value
+literal used a plain space where `Intl` emits U+00A0, which made a passing case look like a failure.
+
+**The harness itself was fixed.** Feature 17's `/review` recorded that check scripts could only
+import modules whose `@/` imports were all `import type`, because a runtime one does not strip. That
+made `lib/jobs.ts` unreachable and the whole harness dependent on a file never gaining a real import.
+A `--import` resolver hook now resolves `@/` and supplies the `.ts` extension, so any lib module can
+be checked. It must test `statSync().isFile()`, not `existsSync()` — `@/types` is a real directory
+and would otherwise shadow `types/index.ts`.
+
+**Browser pass** at 1470px, 834px and an emulated 414px. The form goes four columns → two → stacked;
+the select fits its card at every width and the button stays bottom-aligned with it. Seeding was
+confirmed live for three profiles: "Pune, India" → India, "Springfield" → United States,
+"London, UK" → United Kingdom.
+
+### The dedupe path — exercised for the first time
+
+Never run since feature 10 built it. Proven on a synthetic probe row created and destroyed for the
+purpose, so no real row was mutated: a row carrying `found_at`, `researched_at` and a dossier was
+re-upserted with the **exact 16-column payload `agent/adzuna.ts` sends** and its
+`ON CONFLICT (user_id, source, external_id) DO UPDATE`.
+
+Result: **one row, not two.** `researched_at` unchanged, `company_research` survived, `found_at`
+unchanged — and `match_score` 42 → 99, `location`, `salary`, `job_type` and `run_id` all refreshed.
+Exactly the split the omission list promises, and the rule both dashboard time charts depend on.
+
+**`found_at` first appeared to have changed and had not.** The comparison literal was
+millisecond-precision while Postgres stores microseconds (`12:32:50.222036`), so an equality test
+against `.222` returned false. Reading the value back showed it 24.7 seconds older than `now()` — the
+original insert time, not the upsert time. **The check was wrong, not the code.**
+
+**Still not exercised end to end**: the SDK's own `on_conflict` emission on a second run, and the
+re-scoring path. That needs one signed-in search run twice.
+
+### The Indianapolis rows — nine deleted, one kept
+
+Nine of the ten were deleted. **The tenth was kept because it carries a company dossier** — one of
+only two on the account, produced by a real Browserbase session, and the "Researched Oracle" entry in
+the activity feed. Found by listing the rows before deleting rather than after; the plan had assumed
+all ten were disposable.
+
+**The ten Virginia rows were never a defect.** Checking each run against its own rows showed they
+came from a search whose location was "US", so Virginia is a correct result. That note had been
+carried in this file and in `memory.md` and was overstated.
+
+Effect on the live account: 40 jobs → 31, and **average match rate 51% → 57%** — the six-point lift
+is the measure of how much the wrong-country rows were dragging the number down. Both dossiers
+intact, and no probe rows left behind.

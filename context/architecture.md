@@ -10,7 +10,7 @@
 | AI browser control             | Stagehand                | Company page interaction and content extraction  |
 | Job Discovery                  | Adzuna API               | Job search and discovery                         |
 | AI model                       | OpenAI GPT-4o            | Matching, research synthesis, extraction         |
-| Analytics                      | PostHog                  | Event tracking and dashboard charts              |
+| Analytics                      | PostHog                  | Event tracking. **Not** a read source — see below |
 | PDF generation                 | @react-pdf/renderer      | Resume PDF rendering                             |
 | Styling                        | Tailwind CSS + shadcn/ui | UI components and styling                        |
 | Language                       | TypeScript strict        | Throughout                                       |
@@ -135,7 +135,7 @@
 │   ├── profile.ts                         → fetchProfile, parseProfile + both directions of the row <-> form mapping
 │   ├── jobs.ts                            → parseJobList, the discovery banner sentence, the filtered/sorted/paged list read, and the single-job read
 │   ├── charts.ts                          → Axis ceilings, bar heights, the smoothed line path
-│   ├── dashboard.ts                       → fetchDashboardStats + the mock series features 16-17 replace
+│   ├── dashboard.ts                       → fetchDashboardData (stats + all three chart series), fetchRecentActivity
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -378,6 +378,7 @@ Three columns from earlier drafts do not exist and must not be re-added:
 | matched_skills     | text[]      | Skills user has that match                     |
 | missing_skills     | text[]      | Skills user lacks                              |
 | company_research   | jsonb       | Company dossier from research agent            |
+| researched_at      | timestamptz | When that dossier was written. Null until then |
 | found_at           | timestamptz |                                                |
 
 **`about_role` is a fragment, not a summary.** This row said "2-3 sentence summary", which is what a
@@ -408,7 +409,7 @@ statement repeats the predicate, and PostgREST's `on_conflict` parameter emits n
 upsert failed with *"there is no unique or exclusion constraint matching the ON CONFLICT
 specification"*. Migration `20260802124740_jobs-dedupe-index-non-partial.sql` drops it.
 
-**The upsert must never include `company_research` or `found_at` in its payload.** PostgREST builds
+**The upsert must never include `company_research`, `researched_at` or `found_at` in its payload.** PostgREST builds
 its `ON CONFLICT DO UPDATE SET` list from the payload's own keys, so omitting a column is the only
 way to say "write this once and never touch it again". Re-discovery refreshes title, salary,
 `match_score`, `match_reason` and the skill arrays; a dossier the user spent a Browserbase session on
@@ -542,6 +543,14 @@ server through `createAuthActions()`.
 ---
 
 ## PostHog Pattern
+
+**PostHog is write-only on this project, and the dashboard charts do not read it.** The stack table
+above said "Event tracking and dashboard charts" until feature 17 went to build them and found there
+is no way to read PostHog at all: the only credential is the public write-only project token, with
+no MCP server and no installed skill. All three charts read the user's own `jobs` rows instead —
+`found_at`, `match_score` and `researched_at` — which is also the more correct source, since
+`job_found` carries no `jobId` and fires again on a re-discovery that `found_at` deliberately
+ignores. Nothing below changed; capture works exactly as described.
 
 There is no `lib/posthog-client.ts` and no PostHog provider component. Next 16's
 `instrumentation-client.ts` runs after the document loads and before hydration, which is strictly
@@ -690,8 +699,10 @@ Rules the AI agent must never violate:
 - **Every value that reaches a chart is checked for finiteness first.** `lib/charts.ts` coerces
   `NaN` and `Infinity` to zero and logs, because a single non-finite value otherwise renders the
   string "NaN" across an axis, sets a bar's height to the invalid CSS `"NaN%"`, and makes the line's
-  `d` attribute unparseable so the curve disappears — all without throwing. Feature 17 feeds these
-  functions from PostHog, which is external input. Found by `/review` on feature 14.
+  `d` attribute unparseable so the curve disappears — all without throwing. Found by `/review` on
+  feature 14. Feature 17 feeds these functions from the database rather than from PostHog, which
+  does not retire the rule: a PostgREST row is external input in exactly the same way, which is why
+  `parseJobFacts` narrows every value before it reaches a builder.
 - Every GPT-4o response is validated with zod before use, for the same reason. A model response is
   untrusted input, not a typed object.
 - The resume object key is always `{user.id}/resume.pdf` derived from the session. No route accepts
@@ -714,6 +725,10 @@ Rules the AI agent must never violate:
   `jobs.source_url` is writable by any authenticated user under the `jobs_owner` policy, so a
   crafted row would otherwise point the research agent at the cloud metadata endpoint and render the
   response back through GPT-4o. Found by `/review` on feature 13.
+- **`researched_at` is written in the same statement as the dossier, never separately.** It is what
+  the dashboard's activity feed sorts on, and `found_at` cannot stand in for it — on this database
+  the two are seven to nine hours apart, so a feed built on `found_at` would order research entries
+  wrongly and date them hours early. Added by feature 16.
 - **The research agent never replaces good data with worse.** The description backfill only writes a
   column that is currently empty or still holds Adzuna's truncated snippet, and a dossier that
   reached the company's website is never overwritten by one synthesised without it. A re-run can

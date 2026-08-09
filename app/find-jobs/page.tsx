@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
 import { createInsforgeServer } from "@/lib/insforge-server";
 import { fetchJobPage, parseJobQuery } from "@/lib/jobs";
+import { detectCountry } from "@/lib/adzuna";
 import { parseProfile } from "@/lib/profile";
 
 type Props = {
@@ -45,9 +46,15 @@ export default async function FindJobsPage({ searchParams }: Props) {
 
       <main className="flex-1 bg-background">
         <div className="mx-auto w-full max-w-[1440px] space-y-6 px-6 py-8">
+          {/* The market is seeded from the saved profile location, not guessed
+              from the search box. detectCountry() returning the wrong answer
+              here is visible in the select and one click from being corrected —
+              which is the whole difference from the version that silently sent
+              a search for "India" to the United States. */}
           <SearchControls
             userId={user.id}
             blocked={!completeness(profile).isComplete}
+            defaultCountry={detectCountry(profile?.location ?? null)}
           />
 
           <JobFilters query={listQuery} />

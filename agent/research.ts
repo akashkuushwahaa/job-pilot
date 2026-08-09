@@ -122,9 +122,12 @@ async function saveDossier(
   jobId: string,
   dossier: CompanyDossier,
 ): Promise<boolean> {
+  // researched_at travels with the dossier, always. It is what the dashboard's
+  // activity feed sorts on — found_at is when the job was discovered, which on
+  // this database is seven to nine hours earlier than when it was researched.
   const { error } = await insforge.database
     .from("jobs")
-    .update({ company_research: dossier })
+    .update({ company_research: dossier, researched_at: new Date().toISOString() })
     .eq("id", jobId)
     .eq("user_id", userId);
 
