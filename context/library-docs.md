@@ -327,11 +327,24 @@ url-sourced rows with a NULL `external_id` still never collide.
 - `source` is always `'search'` for Adzuna jobs — never any other value
 - `salary_is_predicted: "1"` means Adzuna estimated the salary — this is normal
 - Adzuna description is a snippet — GPT-4o scores from it, not a full description
-- Default country to `'us'` — support `gb`, `au`, `ca` as alternatives
-- **Detect the country from explicit country names only, never from a city.** A
-  wrong country is not an error Adzuna reports; it silently returns nothing. And
-  never match the bare code `ca` — that is how half the United States writes
-  California
+- **All 19 markets Adzuna serves are supported**, verified against the live API
+  with `category=it-jobs`: `at au be br ca ch de es fr gb in it mx nl nz pl sg us
+  za`. `ie` and `ae` answer 404 and are not markets. This list used to be four,
+  and that was the defect — an absent market did not fail, it fell through to `us`
+  and returned confident nonsense
+- **The country is chosen by the user, not inferred from the location text.**
+  `detectCountry()` still exists but only *seeds* the select from the saved
+  profile location, where a wrong guess is visible and one click from correction.
+  It is never called on the search box
+- Still: country names only, never a city, and never the bare code `ca` — that is
+  how half the United States writes California
+- **Salary symbols come from `Intl.NumberFormat`**, not a hand-written table.
+  Country → ISO code, then `style: "currency"` with `notation: "compact"`.
+  `currencyDisplay` stays at its default `"symbol"`, never `"narrowSymbol"`:
+  narrow collapses AUD, CAD, SGD, MXN and NZD all to a bare `$`, so a Singapore
+  salary would read as US dollars. Compact also handles the sub-1000 rule for
+  free — 950 formats as `$950`, not `$1K`. Note the separator is U+00A0, not a
+  plain space, which matters to any test comparing a literal
 - **Parse the response with zod, per result.** A third party payload is untrusted
   input in the same way a GPT-4o response is. One malformed listing should cost
   that listing, not the search

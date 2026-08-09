@@ -11,9 +11,9 @@ Update this file after every completed feature. Any AI agent reading this should
 `/dashboard` now renders entirely from the user's own rows. **The source is the database, not
 PostHog** — PostHog cannot be read from this project at all, and could not answer two of the three
 questions if it could. Details below.
-**Open defect, carried:** searching a country the app does not support returns confidently wrong
-results rather than nothing — "India" was scored as Indianapolis. Details in Notes. Oldest open item,
-and it is now visible on the dashboard: those ten rows are part of the 19 scoring under 50.
+**Oldest open defect — FIXED.** Searching a country the app did not support returned confidently
+wrong results rather than nothing ("India" → Indianapolis). The market is now an explicit field on the
+search form covering all 19 Adzuna markets, and nine of the ten bad rows are gone. Details below.
 **Standing gap — CLOSED.** `/dashboard` was opened signed in on 2026-08-09 and looks right. Every
 PostgREST call features 15, 16 and 17 make has now executed against the live API. That gap had been
 open since feature 14.
@@ -1727,3 +1727,99 @@ tooltip. The `sr-only` list and the axis carry the data otherwise. Giving the ma
 means either 13 extra tab stops on the dashboard or a Client Component, and neither was worth it for
 a second copy of data the page already exposes — but if touch users start asking for it, that is the
 trade to revisit.
+
+### Country selection — the oldest open defect, closed
+
+`detectCountry()` used to read the free-text Location field and fall back to `us` when it recognised
+nothing. A search for "India" therefore ran against the US index and returned ten Indianapolis
+listings — confidently wrong rather than empty, which is the worst shape a wrong answer can take.
+`ADZUNA_COUNTRIES` is now all **19 markets Adzuna actually serves**, and the market is chosen by the
+user rather than guessed.
+
+**All 19 were verified against the live API before the list was widened**, with `category=it-jobs`,
+and their IT job counts recorded: us 371,374 · in 86,206 · gb 35,754 · ca 17,693 · au 11,891 ·
+za 10,299 · sg 10,104 · fr 8,867 · pl 7,232 · de 2,906 · es 1,174 · br 989 · mx 964 · nl 836 ·
+it 760 · nz 701 · be 481 · at 367 · ch 338. `ie` and `ae` answer 404 and are not Adzuna markets.
+**India is the second-largest market on the platform** — the one the app was silently redirecting.
+
+Decisions:
+
+- **The old comment justifying four markets was wrong on both counts.** It claimed the others were
+  "a separate host path and an untested category vocabulary"; the path differs only in the country
+  segment, and `it-jobs` returns results in all nineteen. A short list cost nothing to widen and cost
+  a real defect to keep.
+- **`detectCountry` survives but is demoted to seeding.** It reads the saved *profile* location to
+  preselect the field — never the search box. The difference is that a wrong guess is now visible in
+  a select and one click from being corrected, instead of silently deciding the query.
+- **The route validates the country with `z.enum(ADZUNA_COUNTRIES)` rather than defaulting.** A
+  country the server does not serve is a broken client, and answering it with a US search is the
+  exact failure being removed.
+- **The banner names the market**: "Found 10 jobs in India — 3 are strong matches." The zero-result
+  sentence names it too and suggests changing country, because a wrong market is the likeliest reason
+  a real search returns nothing.
+- **Salary symbols come from `Intl.NumberFormat`, not a table.** Nineteen hand-written symbols is a
+  table to get wrong; only the ISO code is stated. `currencyDisplay` stays at the default `"symbol"`
+  — `"narrowSymbol"` collapses AUD, CAD, SGD, MXN and NZD to a bare `$`, so a Singapore salary would
+  read as US dollars. Compact notation also absorbs the old `formatAmount`'s sub-1000 rule for free.
+- **The Location placeholder no longer invites a country** — "Remote, Bengaluru, New York…". Typing a
+  country there is what produced Indianapolis.
+
+**Two things visible in the rendering changed**: salaries read `£70K` rather than `£70k` (Intl's
+compact notation capitalises), and Canada renders `CA$` rather than `C$`. Neither is specified in any
+design file.
+
+**Verified by execution: 44 checks.** 34 over the market list, the seeding heuristic and the banner —
+including that **Indiana is not India** and **Austria is not Australia** (both one word-boundary away
+from being wrong), that California is still not Canada, that all 19 markets seed correctly from a
+plausible profile location, and every banner form. 10 over the salary formatter across all 19
+markets, confirming no two dollar-markets render identically.
+
+**Two real bugs the checks caught, neither visible by reading:** the market list had **Austria before
+Australia** — they diverge at the fifth letter, where "a" sorts before "i" — and an expected-value
+literal used a plain space where `Intl` emits U+00A0, which made a passing case look like a failure.
+
+**The harness itself was fixed.** Feature 17's `/review` recorded that check scripts could only
+import modules whose `@/` imports were all `import type`, because a runtime one does not strip. That
+made `lib/jobs.ts` unreachable and the whole harness dependent on a file never gaining a real import.
+A `--import` resolver hook now resolves `@/` and supplies the `.ts` extension, so any lib module can
+be checked. It must test `statSync().isFile()`, not `existsSync()` — `@/types` is a real directory
+and would otherwise shadow `types/index.ts`.
+
+**Browser pass** at 1470px, 834px and an emulated 414px. The form goes four columns → two → stacked;
+the select fits its card at every width and the button stays bottom-aligned with it. Seeding was
+confirmed live for three profiles: "Pune, India" → India, "Springfield" → United States,
+"London, UK" → United Kingdom.
+
+### The dedupe path — exercised for the first time
+
+Never run since feature 10 built it. Proven on a synthetic probe row created and destroyed for the
+purpose, so no real row was mutated: a row carrying `found_at`, `researched_at` and a dossier was
+re-upserted with the **exact 16-column payload `agent/adzuna.ts` sends** and its
+`ON CONFLICT (user_id, source, external_id) DO UPDATE`.
+
+Result: **one row, not two.** `researched_at` unchanged, `company_research` survived, `found_at`
+unchanged — and `match_score` 42 → 99, `location`, `salary`, `job_type` and `run_id` all refreshed.
+Exactly the split the omission list promises, and the rule both dashboard time charts depend on.
+
+**`found_at` first appeared to have changed and had not.** The comparison literal was
+millisecond-precision while Postgres stores microseconds (`12:32:50.222036`), so an equality test
+against `.222` returned false. Reading the value back showed it 24.7 seconds older than `now()` — the
+original insert time, not the upsert time. **The check was wrong, not the code.**
+
+**Still not exercised end to end**: the SDK's own `on_conflict` emission on a second run, and the
+re-scoring path. That needs one signed-in search run twice.
+
+### The Indianapolis rows — nine deleted, one kept
+
+Nine of the ten were deleted. **The tenth was kept because it carries a company dossier** — one of
+only two on the account, produced by a real Browserbase session, and the "Researched Oracle" entry in
+the activity feed. Found by listing the rows before deleting rather than after; the plan had assumed
+all ten were disposable.
+
+**The ten Virginia rows were never a defect.** Checking each run against its own rows showed they
+came from a search whose location was "US", so Virginia is a correct result. That note had been
+carried in this file and in `memory.md` and was overstated.
+
+Effect on the live account: 40 jobs → 31, and **average match rate 51% → 57%** — the six-point lift
+is the measure of how much the wrong-country rows were dragging the number down. Both dossiers
+intact, and no probe rows left behind.

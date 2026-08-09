@@ -68,7 +68,7 @@ Full width layout on all pages. No sidebar.
 ### Finding Jobs — Adzuna Discovery
 
 - User goes to Find Jobs page
-- Enters job title and location
+- Enters job title, location, and the country to search
 - Clicks Find Jobs button
 - Agent calls Adzuna API with user's search criteria
 - GPT-4o scores each job 0-100 against user profile
@@ -174,7 +174,7 @@ Full width layout on all pages. No sidebar.
 - Profile form with all standard resume fields
 - Resume PDF upload with optional profile auto-fill via GPT-4o
 - Resume PDF generation from profile data using GPT-4o
-- Adzuna API job discovery — searches by title and location, category filtered to IT jobs
+- Adzuna API job discovery — searches by title, location and an explicitly chosen country (19 markets), category filtered to IT jobs
 - GPT-4o job matching with score, reason, matched skills, missing skills
 - Job details page with full structured description
 - Company Research Agent — single Browserbase session browses company public pages, GPT-4o builds dossier
@@ -237,7 +237,7 @@ A developer or technical job seeker who:
 ## Success Criteria
 
 - User can sign up, fill profile, upload resume, and start finding jobs in under 5 minutes
-- Adzuna job discovery returns relevant tech jobs for any title and location search
+- Adzuna job discovery returns relevant tech jobs for any title, location and market
 - GPT-4o match scores feel accurate and the reasoning makes sense
 - Company Research Agent returns a useful dossier for well-known tech companies
 - Company Research Agent gracefully handles companies with minimal web presence
