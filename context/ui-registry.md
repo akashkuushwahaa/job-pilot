@@ -1321,8 +1321,17 @@ are the child, so a bar series and a line series cannot drift apart on anything 
   `i / (n - 1)` so the first and last land on the plot edges, which is where the line chart's first
   and last points are. Using `slot` for the line would inset the curve from both edges.
 - **`whitespace-nowrap` on the category labels is load-bearing**, not tidying: the score buckets
-  ("50-60%") break at their hyphen and wrap to two lines in the narrow card without it. Caught in the
-  browser, not by reading.
+  break at their hyphen and wrap to two lines in the narrow card without it. Caught in the browser,
+  not by reading.
+- **The category labels have to fit their equal share, and six of them barely do.** `flex-1` carries
+  `min-width: auto`, so a `whitespace-nowrap` label wider than its share expands and steals from its
+  neighbours — the slots stop being equal and every label drifts off the bar above it. Feature 17
+  took the score distribution from five categories to six and hit exactly that: at 414px the six
+  labelled `50-60%`…`90-100%` needed 274px of the 277px available and rendered as one unbroken run
+  with no gap, drifting up to 8px. Dropping the repeated `%` (the card is titled "Match Score
+  Distribution") returned ~7px each, restoring equal slots, zero drift and 8px of gap. **Measured in
+  the browser at an emulated 414px — a resized window bottoms out at ~500px and hides this.** Adding
+  a seventh category, or lengthening a label, needs the same measurement.
 - **`figure` / `figcaption`, not `section` / `h2`.** The title names a graphic, and the graphic
   carries its own `sr-only` value list — see below.
 - **`emptyMessage` replaces the whole frame, it does not sit on top of it.** An axis with no marks

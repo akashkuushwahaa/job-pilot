@@ -10,7 +10,7 @@
 | AI browser control             | Stagehand                | Company page interaction and content extraction  |
 | Job Discovery                  | Adzuna API               | Job search and discovery                         |
 | AI model                       | OpenAI GPT-4o            | Matching, research synthesis, extraction         |
-| Analytics                      | PostHog                  | Event tracking and dashboard charts              |
+| Analytics                      | PostHog                  | Event tracking. **Not** a read source — see below |
 | PDF generation                 | @react-pdf/renderer      | Resume PDF rendering                             |
 | Styling                        | Tailwind CSS + shadcn/ui | UI components and styling                        |
 | Language                       | TypeScript strict        | Throughout                                       |
@@ -135,7 +135,7 @@
 │   ├── profile.ts                         → fetchProfile, parseProfile + both directions of the row <-> form mapping
 │   ├── jobs.ts                            → parseJobList, the discovery banner sentence, the filtered/sorted/paged list read, and the single-job read
 │   ├── charts.ts                          → Axis ceilings, bar heights, the smoothed line path
-│   ├── dashboard.ts                       → fetchDashboardStats, fetchRecentActivity + the mock chart series
+│   ├── dashboard.ts                       → fetchDashboardData (stats + all three chart series), fetchRecentActivity
 │   └── utils.ts                           → Shared utility functions and constants
 └── types/
     └── index.ts                           → Global TypeScript types
@@ -544,6 +544,14 @@ server through `createAuthActions()`.
 
 ## PostHog Pattern
 
+**PostHog is write-only on this project, and the dashboard charts do not read it.** The stack table
+above said "Event tracking and dashboard charts" until feature 17 went to build them and found there
+is no way to read PostHog at all: the only credential is the public write-only project token, with
+no MCP server and no installed skill. All three charts read the user's own `jobs` rows instead —
+`found_at`, `match_score` and `researched_at` — which is also the more correct source, since
+`job_found` carries no `jobId` and fires again on a re-discovery that `found_at` deliberately
+ignores. Nothing below changed; capture works exactly as described.
+
 There is no `lib/posthog-client.ts` and no PostHog provider component. Next 16's
 `instrumentation-client.ts` runs after the document loads and before hydration, which is strictly
 earlier than a provider in the tree, so it owns browser init. Client components import the
@@ -691,8 +699,10 @@ Rules the AI agent must never violate:
 - **Every value that reaches a chart is checked for finiteness first.** `lib/charts.ts` coerces
   `NaN` and `Infinity` to zero and logs, because a single non-finite value otherwise renders the
   string "NaN" across an axis, sets a bar's height to the invalid CSS `"NaN%"`, and makes the line's
-  `d` attribute unparseable so the curve disappears — all without throwing. Feature 17 feeds these
-  functions from PostHog, which is external input. Found by `/review` on feature 14.
+  `d` attribute unparseable so the curve disappears — all without throwing. Found by `/review` on
+  feature 14. Feature 17 feeds these functions from the database rather than from PostHog, which
+  does not retire the rule: a PostgREST row is external input in exactly the same way, which is why
+  `parseJobFacts` narrows every value before it reaches a builder.
 - Every GPT-4o response is validated with zod before use, for the same reason. A model response is
   untrusted input, not a typed object.
 - The resume object key is always `{user.id}/resume.pdf` derived from the session. No route accepts

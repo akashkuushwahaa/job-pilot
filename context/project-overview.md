@@ -4,7 +4,7 @@
 
 JobPilot is a full stack AI-powered job hunting assistant. The user sets up their profile once, uploads their resume, and the agent automatically discovers relevant jobs from Adzuna — scoring each one against the user's profile using GPT-4o. For jobs they're interested in, the agent researches the company across their public web pages and builds a structured dossier — company overview, tech stack, culture, why the role exists, and interview prep. The user reviews everything and applies with one click.
 
-The entire process is tracked on a dashboard with PostHog-powered analytics and a recent activity feed.
+The entire process is tracked on a dashboard with analytics charts and a recent activity feed, both read from the user's own rows.
 
 ---
 
@@ -119,10 +119,17 @@ Full width layout on all pages. No sidebar.
 
 - Stats bar — 4 cards: Total Jobs Found, Avg. Match Rate, Companies Researched, Jobs This Week
 - Recent activity — list of last 5-10 user actions pulled from DB
-- Analytics section (PostHog powered):
-  - Jobs found over time — line chart
-  - Match score distribution — bar chart
-  - Company research activity — bar chart
+- Analytics section (read from the user's own `jobs` rows, **not** PostHog — see the note below):
+  - Jobs found over time — line chart, last 7 days, from `found_at`
+  - Match score distribution — bar chart, all time, from `match_score`
+  - Company research activity — bar chart, last 7 days, from `researched_at`
+
+> **PostHog is write-only on this project.** These three lines said "PostHog-powered" until
+> feature 17 built the charts and found there is no way to read PostHog at all — the only credential
+> is the public write-only project token, with no MCP server and no installed skill. The events
+> still fire and are still the product's event record; they are not a read source. Postgres holds
+> all three series exactly, and more correctly: `job_found` carries no `jobId`, so it cannot count
+> distinct jobs, and it fires again on a re-discovery that `found_at` deliberately ignores.
 
 ### Find Jobs Page
 
@@ -174,7 +181,7 @@ Full width layout on all pages. No sidebar.
 - Find Jobs page with search controls, filter, sort dropdown, pagination
 - Dashboard with stats bar, recent activity, analytics charts
 - PostHog event tracking throughout
-- PostHog analytics charts on dashboard
+- Analytics charts on dashboard, read from the database
 - Incomplete profile banner on dashboard
 - "Jobs by Adzuna" credit on all job listings
 

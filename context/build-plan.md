@@ -588,8 +588,30 @@ Wire three dashboard charts to real PostHog event data for current user.
 > markup, and it keeps all three on the server rather than making them Client Components. Same call
 > feature 01 made on `class-variance-authority` and feature 05 made on the shadcn CLI.
 > **Feature 17 therefore changes the data source and nothing else.** `BarChart` and `LineChart` take
-> `ChartPoint[]`; swap `lib/dashboard.ts`'s four mock functions for PostHog reads and the components
-> are untouched. The axis, the curve and the bar geometry live in `lib/charts.ts`.
+> `ChartPoint[]`; swap `lib/dashboard.ts`'s mock functions for real reads and the components are
+> untouched. The axis, the curve and the bar geometry live in `lib/charts.ts`.
+>
+> Corrected again in feature 17, which had to build them. **The source is the database, not PostHog,
+> and all four bullets above are wrong about it.**
+> **PostHog cannot be read from this project at all.** The only credential is the write-only public
+> project token; there is no PostHog MCP server and no installed skill. A read would mean minting an
+> account-wide personal API key, shipping it in server env and hand-rolling a HogQL client.
+> **It could not answer two of the three questions even if it could be read.** `job_found` carries
+> `{ userId, source, matchScore }` and no `jobId`, so distinct jobs cannot be counted, and it fires
+> once per saved row on *every* run — while `found_at` is deliberately omitted from the discovery
+> upsert so it keeps meaning *first discovered*. A repeated search inflates the event series and
+> leaves the rows correct. Postgres holds all three series exactly: `found_at`, `match_score`, and
+> the `researched_at` feature 16 added. PostHog still captures; it is no longer read.
+> **The two time charts cover 7 days, not 30.** Feature 14 built and the design draws seven points;
+> thirty daily labels do not fit the card, and seven puts Jobs Found Over Time on the same window as
+> Company Research Activity beside it.
+> **The score distribution has six buckets, not five.** The five named above start at 50, and this
+> account's scores run 30-65 — **19 of its 30 rows fall under 50** and would have been dropped from
+> a chart whose whole job is to show the distribution. A `<50` bucket is what makes every scored job
+> appear somewhere.
+> **One read serves all three charts and three of the four stat cards.** The stats query already
+> selected every one of the user's job rows; adding `researched_at` to it means feature 17 adds no
+> query at all. Same call feature 15 recorded in choosing two queries over four.
 
 ---
 
