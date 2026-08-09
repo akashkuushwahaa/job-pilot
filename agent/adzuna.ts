@@ -1,7 +1,11 @@
 import { logAgent, logAgentError } from "@/agent/logs";
 import { scoreJob } from "@/agent/matcher";
 import type { DiscoveryResult, JobScore } from "@/agent/types";
-import { detectCountry, searchAdzunaJobs, type AdzunaJob } from "@/lib/adzuna";
+import {
+  searchAdzunaJobs,
+  type AdzunaCountry,
+  type AdzunaJob,
+} from "@/lib/adzuna";
 import type { InsforgeServerClient } from "@/lib/insforge-server";
 import type { Profile } from "@/types";
 
@@ -74,11 +78,17 @@ async function finishRun(
   }
 }
 
+// `country` is passed in, never inferred here. It used to be derived from the
+// free-text location with detectCountry(), and an unrecognised country fell
+// through to `us` — which is how a search for "India" returned ten Indianapolis
+// listings. The market is now an explicit field on the form and travels the
+// whole way down.
 export async function discoverJobs(
   insforge: InsforgeServerClient,
   userId: string,
   jobTitle: string,
   location: string,
+  country: AdzunaCountry,
   profile: Profile,
 ): Promise<DiscoveryResult> {
   let runId: string | null = null;
@@ -108,7 +118,6 @@ export async function discoverJobs(
 
     runId = openedId;
 
-    const country = detectCountry(location);
     const search = await searchAdzunaJobs(jobTitle, location, country);
 
     if (!search.success) {
@@ -132,7 +141,7 @@ export async function discoverJobs(
     // something real and Adzuna simply has nothing in that market today.
     if (search.jobs.length === 0) {
       await finishRun(insforge, runId, "completed", 0);
-      return { success: true, savedScores: [] };
+      return { success: true, savedScores: [], country };
     }
 
     // Concurrent rather than sequential: ten sequential model calls is 30-40
@@ -167,7 +176,7 @@ export async function discoverJobs(
 
     if (scored.length === 0) {
       await finishRun(insforge, runId, "completed", 0);
-      return { success: true, savedScores: [] };
+      return { success: true, savedScores: [], country };
     }
 
     const { error: upsertError } = await insforge.database
@@ -204,6 +213,7 @@ export async function discoverJobs(
     return {
       success: true,
       savedScores: scored.map((entry) => entry.score.matchScore),
+      country,
     };
   } catch (error) {
     console.error("[agent/adzuna]", error);

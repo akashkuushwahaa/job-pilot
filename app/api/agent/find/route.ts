@@ -3,6 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 
 import { discoverJobs } from "@/agent/adzuna";
+import { ADZUNA_COUNTRIES } from "@/lib/adzuna";
 import { requireUser } from "@/lib/auth";
 import { completeness } from "@/lib/completeness";
 import { createInsforgeServer } from "@/lib/insforge-server";
@@ -15,6 +16,11 @@ const MAX_FIELD_LENGTH = 120;
 const RequestSchema = z.object({
   jobTitle: z.string().trim().min(1).max(MAX_FIELD_LENGTH),
   location: z.string().trim().max(MAX_FIELD_LENGTH).default(""),
+  // Validated against the real market list rather than defaulted. A country the
+  // server does not serve is a broken client, and answering it with a US search
+  // is the exact failure this field was added to remove — so an unknown value
+  // is refused, not quietly substituted.
+  country: z.enum(ADZUNA_COUNTRIES),
 });
 
 const INCOMPLETE =
@@ -40,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const parsed = RequestSchema.safeParse(body);
 
     if (!parsed.success) {
-      return failure("Enter a job title to search.", 400);
+      return failure("Enter a job title and choose a country to search.", 400);
     }
 
     const { data: row, error: readError } = await insforge.database
@@ -69,6 +75,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       user.id,
       parsed.data.jobTitle,
       parsed.data.location,
+      parsed.data.country,
       profile,
     );
 
@@ -76,7 +83,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return failure(result.error, 502);
     }
 
-    const { savedScores } = result;
+    const { savedScores, country } = result;
 
     // One event per saved job — job_found powers the Jobs Found Over Time and
     // Match Score Distribution charts in feature 17. Inside after() and never
@@ -98,7 +105,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       success: true,
       data: {
         found: savedScores.length,
-        message: discoveryMessage(savedScores),
+        message: discoveryMessage(savedScores, country),
       },
     });
   } catch (error) {
